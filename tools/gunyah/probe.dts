@@ -1,0 +1,39 @@
+/dts-v1/;
+
+/*
+ * Smallest device tree a Gunyah VM will accept as its config image.
+ * The resource manager overlays this blob with the VM's own nodes, so it only
+ * has to be structurally valid and describe the memory the probe lends.
+ */
+/ {
+	#address-cells = <2>;
+	#size-cells = <2>;
+	compatible = "onelineage,gunyah-probe";
+	model = "OneLineage Gunyah executable probe";
+
+	chosen {
+		bootargs = "console=null";
+	};
+
+	memory@80000000 {
+		device_type = "memory";
+		reg = <0x0 0x80000000 0x0 0x800000>;
+	};
+
+	cpus {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		cpu@0 {
+			device_type = "cpu";
+			compatible = "arm,armv8";
+			reg = <0x0>;
+			enable-method = "psci";
+		};
+	};
+
+	psci {
+		compatible = "arm,psci-1.0";
+		method = "hvc";
+	};
+};

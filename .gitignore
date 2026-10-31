@@ -1,0 +1,32 @@
+# Rebuildable / heavy: full XNU source clone and its build tree (1.8 GB)
+build/xnu-src/
+build/xnu-build/
+build/verify/
+build/.claude/
+
+# Kernel module build intermediates (keep the *.ko deliverables)
+*.o
+*.o.*
+*.mod
+*.mod.c
+*.cmd
+.*.cmd
+*.symvers
+*.order
+modules.order
+Module.symvers
+kernel/**/.tmp_versions/
+
+# QEMU / filesystem scratch
+*.img
+*.qcow2
+
+# Python caches
+__pycache__/
+*.pyc
+
+# Local backups
+backups/
+
+# macOS
+.DS_Store
