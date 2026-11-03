@@ -18,6 +18,7 @@ Record layouts written by bsd/dev/arm/systemcalls.c:
     0xae  a = syscall ordinal, b = code, c = result, d = user PC
     0xaf  a = code, b = error, c = result, d = arg0
     0xb0  a = st_dev | st_mode << 32 | st_nlink << 48, b = st_ino
+    0xb6  a = Mach trap number, b = retval, c = arg1, d = user PC
     0xa7  a = pid, b = proc_pid(current)
     0xa5  a = pid, b = 1 (EL0 entry)
 
@@ -46,7 +47,7 @@ SYSNAMES = {
 }
 
 TAGS = {0xa5: "el0-entry", 0xa6: "syscall", 0xa7: "ident", 0xa8: "arm_init",
-        0xae: "sample", 0xaf: "failure", 0xb0: "stat-buffer"}
+        0xae: "sample", 0xaf: "failure", 0xb0: "stat-buffer", 0xb6: "mach-trap"}
 
 
 def decode(path):
@@ -104,6 +105,8 @@ def main(argv):
                          for r in recs if r["tag"] == 0xAF],
             "stat_buffers": [{"w0": r["a"], "st_ino": r["b"]}
                              for r in recs if r["tag"] == 0xB0],
+            "mach_traps": [{"trap": r["a"], "retval": r["b"], "arg1": r["c"],
+                            "pc": r["d"]} for r in recs if r["tag"] == 0xB6],
         }
         pathlib.Path(as_json).write_text(json.dumps(out, indent=1) + "\n")
         print(f"\nwrote {as_json}")

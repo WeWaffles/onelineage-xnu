@@ -156,22 +156,19 @@ ASM_CODE = _assemble([
     #   getpid  cheapest possible call, no arguments at all
     #   open    namei/VFS on devfs, O_RDWR|O_NONBLOCK so read cannot block
     #   write   copyin a string from EL0, then the vnode write path to cons
-    #   getuid  the kauth credential path
-    #   stat64  namei again, and the first call that has the kernel write into
-    #           a page userspace supplied (the __DATA page)
     #   read    the receive side of the same tty; -1/EAGAIN is a valid answer
     #   mmap    the first mapping EL0 asks for itself, rather than one the
     #           loader picked from the Mach-O's segments; the store after it
     #           is the first userspace write through an mmap'd page
-    #   stat64  again, from the mmap'd page, so namei reads a path EL0 stored
+    #   stat64  the first call that has the kernel write into a page userspace
+    #           supplied, and its path comes from the page mmap returned
+    #   mach    task_self, thread_self, host_self, mach_reply_port
     #
     ("movz", 16, SYS_getpid), ("svc",),
     ("movz", 16, SYS_open), ("adr", 0, "path"), ("movz", 1, 6), ("svc",),
     ("mov", 19, 0),
     ("movz", 16, SYS_write), ("mov", 0, 19), ("adr", 1, "msg"),
     ("movz", 2, len(MSG)), ("svc",),
-    ("movz", 16, SYS_getuid), ("svc",),
-    ("movz", 16, SYS_stat64), ("adr", 0, "path"), ("adr", 1, "buf"), ("svc",),
     ("mov", 0, 19), ("adr", 1, "buf"), ("movz", 2, 64),
     ("movz", 16, SYS_read), ("svc",),
     #
@@ -200,6 +197,22 @@ ASM_CODE = _assemble([
     ("movz", 5, 0x6f73), ("movk", 5, 0x656c, 16),   # "sole\0\0\0\0"
     ("str", 5, 20, 8),
     ("movz", 16, SYS_stat64), ("mov", 0, 20), ("adr", 1, "buf"), ("svc",),
+    #
+    # The Mach side of handle_svc().
+    #
+    # handle_svc() reads the trap number from x16 and sends anything negative to
+    # mach_syscall(); BSD's svc #0x80 only looks like a fixed number because the
+    # unix path keeps x16 positive.  These four traps take no arguments and each
+    # returns a port name from the task's own IPC space, which needs no IPC
+    # object to exist yet: they are the cheapest possible proof that the Mach
+    # entry path runs at all, and ports are what launchd bootstraps with.
+    #
+    #   28 task_self    27 thread_self    29 host_self    26 mach_reply_port
+    #
+    ("movn", 16, 27), ("svc",),
+    ("movn", 16, 26), ("svc",),
+    ("movn", 16, 28), ("svc",),
+    ("movn", 16, 25), ("svc",),
     "loop", ("movz", 16, SYS_getpid), ("svc",), ("b", "loop"),
 ], _BLOBS, abs_labels={"buf": DATA_VA}, code_va=CODE_VA)
 
