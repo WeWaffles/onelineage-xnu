@@ -19,6 +19,7 @@ Record layouts written by bsd/dev/arm/systemcalls.c:
     0xaf  a = code, b = error, c = result, d = arg0
     0xb0  a = st_dev | st_mode << 32 | st_nlink << 48, b = st_ino
     0xb8  a = first 8 bytes read() copied out, b = byte count
+    0xb9  a = address mmap returned, b = first 8 bytes there, c = length
           (a record whose seq is far below its neighbours is a stale copy
            from an earlier boot, not a measurement: read seq, not tag alone)
     0xb6  a = Mach trap number, b = retval, c = arg1, d = user PC
@@ -53,7 +54,7 @@ SYSNAMES = {
 
 TAGS = {0xa5: "el0-entry", 0xa6: "syscall", 0xa7: "ident", 0xa8: "arm_init",
         0xae: "sample", 0xaf: "failure", 0xb0: "stat-buffer", 0xb6: "mach-trap",
-        0xb8: "read-bytes"}
+        0xb8: "read-bytes", 0xb9: "mmap-contents"}
 
 
 def decode(path):

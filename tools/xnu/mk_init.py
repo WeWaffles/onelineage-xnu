@@ -208,31 +208,13 @@ _RAW_CODE = [
     ("movz", 2, len(MSG)), ("svc",),
 
     #
-    # mmap at a fixed hint, then use the answer.
+    # stat64 on the console path.
     #
-    # hw/m345 recorded mmap's result as 0xc000, which is 0x10000c000 truncated to
-    # its low word: uu_rval is int[2] and the record took only the half that the
-    # 64-bit return path does not use alone.  The hint (1GB above the image) is
-    # deliberately distinguishable from the page the kernel would pick on its own
-    # (0x10000c000, the first page past __DATA), so the record says whether the
-    # hint was honoured.
+    # The anonymous mapping and the store through it are proven (hw/m346,
+    # m352); the file-backed mapping below replaces them, so this call keeps the
+    # devfs node reading that has been stable since hw/m340.
     #
-    # The store that follows is the actual proof of the mapping, not the result
-    # value: a store into an unmapped page kills PID 1 with SIGSEGV and the
-    # records stop, while a store that lands leaves a path string in the page
-    # that stat64 can then resolve through namei.
-    #
-    ("movz", 0, 0x40, 16), ("movk", 0, 0x1, 32),    # hint 0x100400000
-    ("movz", 1, 0x1000), ("movz", 2, 3), ("movz", 3, 0x1002),
-    ("movn", 4, 0), ("movz", 5, 0),   # fd = -1: MAP_ANON rejects anything else
-    ("movz", 16, SYS_mmap), ("svc",),
-    ("mov", 20, 0),
-    ("movz", 5, 0x642f), ("movk", 5, 0x7665, 16), ("movk", 5, 0x632f, 32),
-    ("movk", 5, 0x6e6f, 48),                        # "/dev/con"
-    ("str", 5, 20, 0),
-    ("movz", 5, 0x6f73), ("movk", 5, 0x656c, 16),   # "sole\0\0\0\0"
-    ("str", 5, 20, 8),
-    ("movz", 16, SYS_stat64), ("mov", 0, 20), ("adr", 1, "buf"), ("svc",),
+    ("movz", 16, SYS_stat64), ("adr", 0, "path"), ("adr", 1, "buf"), ("svc",),
     #
     # The Mach side of handle_svc().
     #
@@ -312,6 +294,20 @@ _RAW_CODE = [
     ("mov", 26, 0),
     ("mov", 0, 26), ("adr", 1, "rbuf"), ("movz", 2, 64),
     ("movz", 16, SYS_read), ("svc",),
+    #
+    # Map the file itself.
+    #
+    # read() proved the filesystem hands over the bytes; this asks the VM to put
+    # the same file behind an address range, which is what dyld does with every
+    # segment of a binary.  PROT_READ, MAP_PRIVATE, the fd from the open, offset
+    # 0, at a hint well clear of the image so the mapping cannot be our own
+    # __TEXT.  The 0xb9 record reads the first eight bytes back out of the
+    # mapping, so the check is on contents rather than on the return value.
+    #
+    ("movz", 0, 0x2, 32),                       # hint 0x200000000
+    ("movz", 1, 0x4000), ("movz", 2, 1), ("movz", 3, 2),
+    ("mov", 4, 26), ("movz", 5, 0),
+    ("movz", 16, SYS_mmap), ("svc",),
     "loop", ("movz", 16, SYS_getpid), ("svc",), ("b", "loop"),
 ]
 ASM_CODE = _assemble(
