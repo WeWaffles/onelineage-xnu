@@ -43,7 +43,11 @@ PAGE_SIZE = 0x4000  # XNU ARM64 uses 16KB pages
 # Numbers from bsd/kern/syscalls.master.  On arm64 the call is svc #0x80 with
 # the number in x16 and the arguments in x0..x7.
 #
-SYS_getpid, SYS_write, SYS_open, SYS_getuid = 20, 4, 5, 24
+SYS_getpid, SYS_write, SYS_open, SYS_getuid, SYS_stat64 = 20, 4, 5, 24, 338
+
+# The code page and the writable page it writes into.
+CODE_VA = 0x100000000 + 0x4000
+DATA_VA = 0x100008000
 
 
 def _movz(rd: int, imm: int) -> int:
@@ -61,7 +65,8 @@ def _mov(rd: int, rs: int) -> int:
     return 0xAA0003E0 | (rs << 16) | rd
 
 
-def _assemble(insns: list, blobs: dict) -> bytes:
+def _assemble(insns: list, blobs: dict, abs_labels: dict = None,
+               code_va: int = 0) -> bytes:
     """Encode a tiny instruction list; adr targets resolve to instruction labels
 
     or to a named blob placed after the code.  Every instruction is 4 bytes, so
@@ -93,7 +98,12 @@ def _assemble(insns: list, blobs: dict) -> bytes:
             out += struct.pack("<I", _mov(ins[1], ins[2]))
         elif kind == "adr":
             rd, label = ins[1], ins[2]
-            delta = labels[label] - len(out)
+            if abs_labels and label in abs_labels:
+                # Absolute target (the writable __DATA page): the displacement
+                # is from this instruction's VA, not from a payload offset.
+                delta = abs_labels[label] - (code_va + len(out))
+            else:
+                delta = labels[label] - len(out)
             immlo = delta & 0x3
             immhi = (delta >> 2) & 0x7FFFF
             out += struct.pack("<I", 0x10000000 | (immlo << 29) | (immhi << 5) | rd)
@@ -133,6 +143,16 @@ ASM_CODE = _assemble([
     ("movz", 2, len(MSG)), ("svc",),
     ("movz", 16, SYS_getuid), ("svc",),
     #
+    # stat64("/dev/console", buf) with buf in the writable page.
+    #
+    # Every call so far either copies in a string or returns a scalar; none of
+    # them made the kernel write into userspace memory.  stat64 does: it fills a
+    # struct stat64 in the caller's buffer, so a success proves both that a
+    # writable segment was mapped at DT_DATA_VA and that namei + the vnode
+    # attribute path work for a devfs node.  It cannot block, unlike read().
+    #
+    ("movz", 16, SYS_stat64), ("adr", 0, "path"), ("adr", 1, "buf"), ("svc",),
+    #
     # Keep calling into the kernel instead of spinning at EL0.
     #
     # `b .` left the kernel with nothing to do: no syscall arrived, nothing
@@ -142,7 +162,7 @@ ASM_CODE = _assemble([
     # heartbeat records arriving) without allocating or copying anything.
     #
     "loop", ("movz", 16, SYS_getpid), ("svc",), ("b", "loop"),
-], _BLOBS)
+], _BLOBS, abs_labels={"buf": DATA_VA}, code_va=CODE_VA)
 
 # Pad code + data to 16-byte alignment
 PAYLOAD = ASM_CODE + MSG + PATH
@@ -190,7 +210,7 @@ def make_macho(entry_va: int = 0x100000000) -> bytes:
     #
     PAGEZERO_SIZE = 0x100000000
 
-    sizeofcmds = lc_seg_size * 2 + lc_thread_size
+    sizeofcmds = lc_seg_size * 3 + lc_thread_size
     hdrs_size  = MACH_HDR_SIZE + sizeofcmds
     file_off   = (hdrs_size + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1)  # round to page
 
@@ -213,7 +233,7 @@ def make_macho(entry_va: int = 0x100000000) -> bytes:
         CPU_TYPE_ARM64,
         CPU_SUBTYPE_ARM64_ALL,
         MH_EXECUTE,
-        3,              # ncmds (__PAGEZERO, __TEXT, LC_UNIXTHREAD)
+        4,              # ncmds (__PAGEZERO, __TEXT, __DATA, LC_UNIXTHREAD)
         sizeofcmds,
         MH_NOUNDEFS,
         0,              # reserved (64-bit only)
@@ -252,6 +272,32 @@ def make_macho(entry_va: int = 0x100000000) -> bytes:
     )
     assert len(seg) == lc_seg_size
 
+    #
+    # LC_SEGMENT_64 __DATA — the writable page stat64 writes into.
+    #
+    # filesize 0 with a non-zero vmsize is the standard zero-fill form: the
+    # loader maps anonymous pages with initprot, nothing is read from the file.
+    # The address must not overlap __TEXT, so it is placed at the first page
+    # past that segment and checked against the constant the code was assembled
+    # with; a mismatch would make every adr point into the wrong page.
+    #
+    data_vmaddr = entry_va + vm_size
+    assert data_vmaddr == DATA_VA, f"__DATA at {data_vmaddr:#x}, code expects {DATA_VA:#x}"
+    data = struct.pack('<II16sQQQQiiii',
+        LC_SEGMENT_64,
+        lc_seg_size,
+        b'__DATA\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00',
+        data_vmaddr,
+        PAGE_SIZE,
+        0,                    # fileoff
+        0,                    # filesize (zero fill)
+        7,                    # maxprot (rwx)
+        3,                    # initprot (rw-)
+        0,                    # nsects
+        0,                    # flags
+    )
+    assert len(data) == lc_seg_size
+
     # LC_UNIXTHREAD — ARM_THREAD_STATE64
     # struct: cmd, cmdsize, flavor, count, state[66 uint32s]
     state = bytearray(THREAD_STATE_SIZE)
@@ -282,6 +328,7 @@ def make_macho(entry_va: int = 0x100000000) -> bytes:
     out[off:off+len(hdr)] = hdr; off += len(hdr)
     out[off:off+len(pagezero)] = pagezero; off += len(pagezero)
     out[off:off+len(seg)] = seg; off += len(seg)
+    out[off:off+len(data)] = data; off += len(data)
     out[off:off+len(lc_thread)] = lc_thread
     out[file_off:file_off+len(PAYLOAD)] = PAYLOAD
 
