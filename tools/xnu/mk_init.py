@@ -51,16 +51,30 @@ CODE_VA = 0x100000000 + 0x4000
 DATA_VA = 0x100008000
 
 
-def _movz(rd: int, imm: int) -> int:
-    """movz <rd>, #imm (imm fits in 16 bits)."""
+def _movz(rd: int, imm: int, shift: int = 0) -> int:
+    """movz <rd>, #imm, lsl #shift (imm fits in 16 bits)."""
     assert 0 <= imm <= 0xFFFF
-    return 0xD2800000 | (imm << 5) | rd
+    assert shift in (0, 16, 32, 48)
+    return 0xD2800000 | ((shift // 16) << 21) | (imm << 5) | rd
 
 
 def _movn(rd: int, imm: int) -> int:
     """movn <rd>, #imm  (the complement form, so -1 is expressible)."""
     assert 0 <= imm <= 0xFFFF
     return 0x92800000 | (imm << 5) | rd
+
+
+def _movk(rd: int, imm: int, shift: int) -> int:
+    """movk <rd>, #imm, lsl #shift  (patch a 16-bit lane into rd)."""
+    assert 0 <= imm <= 0xFFFF
+    assert shift in (0, 16, 32, 48)
+    return 0xF2800000 | ((shift // 16) << 21) | (imm << 5) | rd
+
+
+def _str(rt: int, rn: int, off: int) -> int:
+    """str <rt>, [<rn>, #off]  (64-bit, unsigned immediate, off a multiple of 8)."""
+    assert off % 8 == 0
+    return 0xF9000000 | ((off // 8) << 10) | (rn << 5) | rt
 
 
 def _svc(imm: int = 0x80) -> int:
@@ -98,7 +112,11 @@ def _assemble(insns: list, blobs: dict, abs_labels: dict = None,
             continue
         kind = ins[0]
         if kind == "movz":
-            out += struct.pack("<I", _movz(ins[1], ins[2]))
+            out += struct.pack("<I", _movz(ins[1], ins[2], ins[3] if len(ins) > 3 else 0))
+        elif kind == "movk":
+            out += struct.pack("<I", _movk(ins[1], ins[2], ins[3]))
+        elif kind == "str":
+            out += struct.pack("<I", _str(ins[1], ins[2], ins[3]))
         elif kind == "movn":
             out += struct.pack("<I", _movn(ins[1], ins[2]))
         elif kind == "svc":
@@ -143,7 +161,9 @@ ASM_CODE = _assemble([
     #           a page userspace supplied (the __DATA page)
     #   read    the receive side of the same tty; -1/EAGAIN is a valid answer
     #   mmap    the first mapping EL0 asks for itself, rather than one the
-    #           loader picked from the Mach-O's segments
+    #           loader picked from the Mach-O's segments; the store after it
+    #           is the first userspace write through an mmap'd page
+    #   stat64  again, from the mmap'd page, so namei reads a path EL0 stored
     #
     ("movz", 16, SYS_getpid), ("svc",),
     ("movz", 16, SYS_open), ("adr", 0, "path"), ("movz", 1, 6), ("svc",),
@@ -154,9 +174,32 @@ ASM_CODE = _assemble([
     ("movz", 16, SYS_stat64), ("adr", 0, "path"), ("adr", 1, "buf"), ("svc",),
     ("mov", 0, 19), ("adr", 1, "buf"), ("movz", 2, 64),
     ("movz", 16, SYS_read), ("svc",),
-    ("movz", 0, 0), ("movz", 1, 0x1000), ("movz", 2, 3), ("movz", 3, 0x1002),
+    #
+    # mmap at a fixed hint, then use the answer.
+    #
+    # hw/m345 recorded mmap's result as 0xc000, which is 0x10000c000 truncated to
+    # its low word: uu_rval is int[2] and the record took only the half that the
+    # 64-bit return path does not use alone.  The hint (1GB above the image) is
+    # deliberately distinguishable from the page the kernel would pick on its own
+    # (0x10000c000, the first page past __DATA), so the record says whether the
+    # hint was honoured.
+    #
+    # The store that follows is the actual proof of the mapping, not the result
+    # value: a store into an unmapped page kills PID 1 with SIGSEGV and the
+    # records stop, while a store that lands leaves a path string in the page
+    # that stat64 can then resolve through namei.
+    #
+    ("movz", 0, 0x40, 16), ("movk", 0, 0x1, 32),    # hint 0x100400000
+    ("movz", 1, 0x1000), ("movz", 2, 3), ("movz", 3, 0x1002),
     ("movn", 4, 0), ("movz", 5, 0),   # fd = -1: MAP_ANON rejects anything else
     ("movz", 16, SYS_mmap), ("svc",),
+    ("mov", 20, 0),
+    ("movz", 5, 0x642f), ("movk", 5, 0x7665, 16), ("movk", 5, 0x632f, 32),
+    ("movk", 5, 0x6e6f, 48),                        # "/dev/con"
+    ("str", 5, 20, 0),
+    ("movz", 5, 0x6f73), ("movk", 5, 0x656c, 16),   # "sole\0\0\0\0"
+    ("str", 5, 20, 8),
+    ("movz", 16, SYS_stat64), ("mov", 0, 20), ("adr", 1, "buf"), ("svc",),
     "loop", ("movz", 16, SYS_getpid), ("svc",), ("b", "loop"),
 ], _BLOBS, abs_labels={"buf": DATA_VA}, code_va=CODE_VA)
 
