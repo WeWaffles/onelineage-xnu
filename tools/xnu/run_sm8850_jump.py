@@ -120,7 +120,7 @@ def main() -> int:
     note(f"display state: {txt.strip().replace(chr(10), ' | ')}")
 
     rc, txt = adb(
-        "insmod /data/local/tmp/olxnu/olxnu_payload2_mod_v14.ko "
+        "insmod /data/local/tmp/olxnu/olxnu_payload2_mod_v21.ko "
         "proc_name=olxnu_payload2 payload_size_mb=128 target_pa=0xAE0000000 "
         "auto_base=1")
     note(f"payload insmod rc={rc} {txt}")
