@@ -45,6 +45,7 @@ PAGE_SIZE = 0x4000  # XNU ARM64 uses 16KB pages
 #
 SYS_getpid, SYS_write, SYS_open, SYS_read, SYS_getuid = 20, 4, 5, 3, 24
 SYS_mmap, SYS_stat64 = 197, 338
+SYS_getdirentries64 = 344
 
 # The code page and the writable page it writes into.
 CODE_VA = 0x100000000 + 0x4000
@@ -179,8 +180,9 @@ def _assemble(insns: list, blobs: dict, abs_labels: dict = None,
 
 MSG = b"XNU_EL0_OK\n"
 PATH = b"/dev/console\x00"
+ROOTPATH = b"/\x00"
 
-_BLOBS = {"msg": MSG, "path": PATH}
+_BLOBS = {"msg": MSG, "path": PATH, "rootpath": ROOTPATH}
 
 _RAW_CODE = [
     #
@@ -264,17 +266,20 @@ _RAW_CODE = [
     ("movn", 16, 20), ("svc",),                 # 21  MAKE_SEND is 20, not 0
     #
     # Send half: msgh_bits = MACH_MSGH_BITS(COPY_SEND, 0) = 0x13, size 28,
-    # remote = the port, local/voucher 0, id 0x10, body 0xdeadbeef.
+    # remote = the port, local/voucher 0, id 0x22, body 0xcafebabe.
+    # hw/m351/m352 received the body but msgh_id 0 where 0x10 was sent.
     #
     ("adr", 23, "mbox"),
     ("movabs", 5, (28 << 32) | 0x13), ("str", 5, 23, 0),
     ("str", 21, 23, 8),
-    ("movabs", 5, 0x10 << 32), ("str", 5, 23, 16),
-    ("movabs", 6, 0xdeadbeef), ("str32", 6, 23, 24),
+    ("movabs", 5, 0x22 << 32), ("str", 5, 23, 16),
+    ("movabs", 6, 0xcafebabe), ("str32", 6, 23, 24),
     ("mov", 0, 23),
     ("movabs", 1, 0x800000001),                 # SEND_MSG | MACH64_SEND_ANY
     ("movabs", 2, (28 << 32) | 0x13),
-    ("mov", 3, 21), ("movz", 4, 0), ("movz", 5, 0),
+    ("mov", 3, 21),
+    ("movabs", 4, 0x22 << 32),                  # msgh_voucher_and_id: id 0x22
+    ("movz", 5, 0),
     ("movz", 6, 0), ("movz", 7, 0),
     ("movn", 16, 46), ("svc",),                 # 47  send
     #
@@ -294,6 +299,18 @@ _RAW_CODE = [
     # sent.  The buffer is one page, so giving it room costs nothing.
     ("movz", 6, 0x100), ("movz", 7, 0),
     ("movn", 16, 46), ("svc",),                 # 47  receive
+    #
+    # readdir("/").  stat64 proved namei can resolve a path and that the kernel
+    # fills a page this process owns; a directory read is the other half of the
+    # VFS surface dyld and launchd need, and its result is the number of bytes
+    # the filesystem handed back.  hw/m353 tried "/dev" and got ENOENT from the
+    # open, so the root is probed instead: the root node must exist for
+    # "/dev/console" to have resolved at all.
+    #
+    ("movz", 16, SYS_open), ("adr", 0, "rootpath"), ("movz", 1, 0), ("svc",),
+    ("mov", 26, 0),
+    ("mov", 0, 26), ("adr", 1, "rbuf"), ("movz", 2, 0x200), ("adr", 3, "basep"),
+    ("movz", 16, SYS_getdirentries64), ("svc",),
     "loop", ("movz", 16, SYS_getpid), ("svc",), ("b", "loop"),
 ]
 ASM_CODE = _assemble(
@@ -301,7 +318,8 @@ ASM_CODE = _assemble(
                                      if ins[0] == "movabs" else [ins])],
     _BLOBS,
     abs_labels={"buf": DATA_VA, "portname": DATA_VA + 0x200,
-                "mbox": DATA_VA + 0x400, "rbox": DATA_VA + 0x600},
+                "mbox": DATA_VA + 0x400, "rbox": DATA_VA + 0x600,
+                "rbuf": DATA_VA + 0x800, "basep": DATA_VA + 0xa00},
     code_va=CODE_VA)
 
 # Pad code + data to 16-byte alignment
