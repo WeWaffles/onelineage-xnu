@@ -71,6 +71,28 @@ def _movk(rd: int, imm: int, shift: int) -> int:
     return 0xF2800000 | ((shift // 16) << 21) | (imm << 5) | rd
 
 
+def _ldr32(rt: int, rn: int, off: int) -> int:
+    """ldr <wt>, [<xn>, #off]  (32-bit, unsigned immediate, off a multiple of 4)."""
+    assert off % 4 == 0
+    return 0xB9400000 | ((off // 4) << 10) | (rn << 5) | rt
+
+
+def _str32(rt: int, rn: int, off: int) -> int:
+    """str <wt>, [<xn>, #off]  (32-bit, unsigned immediate, off a multiple of 4)."""
+    assert off % 4 == 0
+    return 0xB9000000 | ((off // 4) << 10) | (rn << 5) | rt
+
+
+def _movabs(rd: int, value: int) -> list:
+    """Materialise any 64-bit constant: movz for lane 0, movk for the rest."""
+    out = [("movz", rd, value & 0xFFFF, 0)]
+    for shift in (16, 32, 48):
+        lane = (value >> shift) & 0xFFFF
+        if lane:
+            out.append(("movk", rd, lane, shift))
+    return out
+
+
 def _str(rt: int, rn: int, off: int) -> int:
     """str <rt>, [<rn>, #off]  (64-bit, unsigned immediate, off a multiple of 8)."""
     assert off % 8 == 0
@@ -117,6 +139,10 @@ def _assemble(insns: list, blobs: dict, abs_labels: dict = None,
             out += struct.pack("<I", _movk(ins[1], ins[2], ins[3]))
         elif kind == "str":
             out += struct.pack("<I", _str(ins[1], ins[2], ins[3]))
+        elif kind == "ldr32":
+            out += struct.pack("<I", _ldr32(ins[1], ins[2], ins[3]))
+        elif kind == "str32":
+            out += struct.pack("<I", _str32(ins[1], ins[2], ins[3]))
         elif kind == "movn":
             out += struct.pack("<I", _movn(ins[1], ins[2]))
         elif kind == "svc":
@@ -147,7 +173,7 @@ PATH = b"/dev/console\x00"
 
 _BLOBS = {"msg": MSG, "path": PATH}
 
-ASM_CODE = _assemble([
+_RAW_CODE = [
     #
     # The payload's whole job is to exercise the BSD layer and report what each
     # call returned.  Every call is stamped by the kernel (0xa6), so the order
@@ -169,8 +195,7 @@ ASM_CODE = _assemble([
     ("mov", 19, 0),
     ("movz", 16, SYS_write), ("mov", 0, 19), ("adr", 1, "msg"),
     ("movz", 2, len(MSG)), ("svc",),
-    ("mov", 0, 19), ("adr", 1, "buf"), ("movz", 2, 64),
-    ("movz", 16, SYS_read), ("svc",),
+
     #
     # mmap at a fixed hint, then use the answer.
     #
@@ -209,12 +234,48 @@ ASM_CODE = _assemble([
     #
     #   28 task_self    27 thread_self    29 host_self    26 mach_reply_port
     #
-    ("movn", 16, 27), ("svc",),
-    ("movn", 16, 26), ("svc",),
-    ("movn", 16, 28), ("svc",),
-    ("movn", 16, 25), ("svc",),
+    ("movn", 16, 27), ("svc",),            # 28 task_self
+    ("mov", 24, 0),
+    ("movn", 16, 28), ("svc",),            # 29 host_self
+    #
+    # A receive right, then a send right for it, then a message that goes out
+    # and comes back.  This is the mechanism launchd is built on: a port it
+    # owns, a right to send to it, and mach_msg carrying the payload.
+    #
+    #   16 mach_port_allocate(task, MACH_PORT_RIGHT_RECEIVE, &name)
+    #   21 mach_port_insert_right(task, name, name, MACH_MSG_TYPE_MAKE_SEND)
+    #   31 mach_msg(header, MACH_SEND_MSG|MACH_RCV_MSG, 28, 28, name, 0, 0)
+    #
+    ("mov", 0, 24), ("movz", 1, 1), ("adr", 2, "portname"),
+    ("movn", 16, 15), ("svc",),
+    ("adr", 22, "portname"), ("ldr32", 21, 22, 0),
+    # MACH_MSG_TYPE_MAKE_SEND is 20 (mach/message.h), not 0: hw/m348 passed 0 and
+    # got KERN_INVALID_RIGHT (0x11) back from the fastpath, which only accepts the
+    # named MAKE_SEND/COPY_SEND forms.
+    ("mov", 0, 24), ("mov", 1, 21), ("mov", 2, 21), ("movz", 3, 20),
+    ("movn", 16, 20), ("svc",),
+    #
+    # struct { msgh_bits, msgh_size, msgh_remote_port, msgh_local_port,
+    #          msgh_voucher_port, msgh_id } followed by a word of body.
+    #   bits  = MACH_MSGH_BITS(MACH_MSG_TYPE_COPY_SEND, 0) = 0x13
+    #   size  = 24 + 4 = 28, remote = the name, local/voucher = 0, id = 0x10
+    #
+    ("adr", 23, "mbox"),
+    ("movabs", 5, (28 << 32) | 0x13), ("str", 5, 23, 0),
+    ("str", 21, 23, 8),
+    ("movabs", 5, 0x10 << 32), ("str", 5, 23, 16),
+    ("movabs", 6, 0xdeadbeef), ("str32", 6, 23, 24),
+    ("mov", 0, 23), ("movz", 1, 3), ("movz", 2, 28), ("movz", 3, 28),
+    ("mov", 4, 21), ("movz", 5, 0), ("movz", 6, 0),
+    ("movn", 16, 30), ("svc",),            # 31 mach_msg
     "loop", ("movz", 16, SYS_getpid), ("svc",), ("b", "loop"),
-], _BLOBS, abs_labels={"buf": DATA_VA}, code_va=CODE_VA)
+]
+ASM_CODE = _assemble(
+    [x for ins in _RAW_CODE for x in (_movabs(ins[1], ins[2])
+                                     if ins[0] == "movabs" else [ins])],
+    _BLOBS,
+    abs_labels={"buf": DATA_VA, "portname": DATA_VA + 0x200, "mbox": DATA_VA + 0x400},
+    code_va=CODE_VA)
 
 # Pad code + data to 16-byte alignment
 PAYLOAD = ASM_CODE + MSG + PATH
