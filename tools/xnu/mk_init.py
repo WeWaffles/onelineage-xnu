@@ -43,7 +43,8 @@ PAGE_SIZE = 0x4000  # XNU ARM64 uses 16KB pages
 # Numbers from bsd/kern/syscalls.master.  On arm64 the call is svc #0x80 with
 # the number in x16 and the arguments in x0..x7.
 #
-SYS_getpid, SYS_write, SYS_open, SYS_getuid, SYS_stat64 = 20, 4, 5, 24, 338
+SYS_getpid, SYS_write, SYS_open, SYS_read, SYS_getuid = 20, 4, 5, 3, 24
+SYS_mmap, SYS_stat64 = 197, 338
 
 # The code page and the writable page it writes into.
 CODE_VA = 0x100000000 + 0x4000
@@ -54,6 +55,12 @@ def _movz(rd: int, imm: int) -> int:
     """movz <rd>, #imm (imm fits in 16 bits)."""
     assert 0 <= imm <= 0xFFFF
     return 0xD2800000 | (imm << 5) | rd
+
+
+def _movn(rd: int, imm: int) -> int:
+    """movn <rd>, #imm  (the complement form, so -1 is expressible)."""
+    assert 0 <= imm <= 0xFFFF
+    return 0x92800000 | (imm << 5) | rd
 
 
 def _svc(imm: int = 0x80) -> int:
@@ -92,6 +99,8 @@ def _assemble(insns: list, blobs: dict, abs_labels: dict = None,
         kind = ins[0]
         if kind == "movz":
             out += struct.pack("<I", _movz(ins[1], ins[2]))
+        elif kind == "movn":
+            out += struct.pack("<I", _movn(ins[1], ins[2]))
         elif kind == "svc":
             out += struct.pack("<I", _svc())
         elif kind == "mov":
@@ -121,46 +130,33 @@ PATH = b"/dev/console\x00"
 _BLOBS = {"msg": MSG, "path": PATH}
 
 ASM_CODE = _assemble([
+    #
+    # The payload's whole job is to exercise the BSD layer and report what each
+    # call returned.  Every call is stamped by the kernel (0xa6), so the order
+    # here is also the reading order of a dump.
+    #
+    #   getpid  cheapest possible call, no arguments at all
+    #   open    namei/VFS on devfs, O_RDWR|O_NONBLOCK so read cannot block
+    #   write   copyin a string from EL0, then the vnode write path to cons
+    #   getuid  the kauth credential path
+    #   stat64  namei again, and the first call that has the kernel write into
+    #           a page userspace supplied (the __DATA page)
+    #   read    the receive side of the same tty; -1/EAGAIN is a valid answer
+    #   mmap    the first mapping EL0 asks for itself, rather than one the
+    #           loader picked from the Mach-O's segments
+    #
     ("movz", 16, SYS_getpid), ("svc",),
-    #
-    # fd = open("/dev/console", O_RDWR)
-    #
-    # O_RDONLY (0) made the write fail with EBADF in hw/m197..m201, which was
-    # correct behaviour, not a kernel bug: preparefilewrite() rejects a
-    # descriptor without FWRITE.  A console is opened O_RDWR.
-    #
-    ("movz", 16, SYS_open), ("adr", 0, "path"), ("movz", 1, 2), ("svc",),
-    #
-    # Write to the descriptor open() returned, not to fd 1.
-    #
-    # hw/m197_a1 has open("/dev/console") succeeding and returning fd 0, and
-    # write(1, ...) failing with EBADF because PID 1 inherits no descriptors.
-    # Writing to the fd that was actually opened is what exercises the rest of
-    # the path: fileproc -> vnode -> cdevsw -> cons -> km tty -> serial/fbcon.
-    #
+    ("movz", 16, SYS_open), ("adr", 0, "path"), ("movz", 1, 6), ("svc",),
     ("mov", 19, 0),
     ("movz", 16, SYS_write), ("mov", 0, 19), ("adr", 1, "msg"),
     ("movz", 2, len(MSG)), ("svc",),
     ("movz", 16, SYS_getuid), ("svc",),
-    #
-    # stat64("/dev/console", buf) with buf in the writable page.
-    #
-    # Every call so far either copies in a string or returns a scalar; none of
-    # them made the kernel write into userspace memory.  stat64 does: it fills a
-    # struct stat64 in the caller's buffer, so a success proves both that a
-    # writable segment was mapped at DT_DATA_VA and that namei + the vnode
-    # attribute path work for a devfs node.  It cannot block, unlike read().
-    #
     ("movz", 16, SYS_stat64), ("adr", 0, "path"), ("adr", 1, "buf"), ("svc",),
-    #
-    # Keep calling into the kernel instead of spinning at EL0.
-    #
-    # `b .` left the kernel with nothing to do: no syscall arrived, nothing
-    # petted the watchdog, and the board reset about 18 s after that last
-    # getuid, with no record saying when.  getpid is the cheapest call in the
-    # table, so a loop over it keeps the syscall path hot (and the kernel's
-    # heartbeat records arriving) without allocating or copying anything.
-    #
+    ("mov", 0, 19), ("adr", 1, "buf"), ("movz", 2, 64),
+    ("movz", 16, SYS_read), ("svc",),
+    ("movz", 0, 0), ("movz", 1, 0x1000), ("movz", 2, 3), ("movz", 3, 0x1002),
+    ("movn", 4, 0), ("movz", 5, 0),   # fd = -1: MAP_ANON rejects anything else
+    ("movz", 16, SYS_mmap), ("svc",),
     "loop", ("movz", 16, SYS_getpid), ("svc",), ("b", "loop"),
 ], _BLOBS, abs_labels={"buf": DATA_VA}, code_va=CODE_VA)
 
