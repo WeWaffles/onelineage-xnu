@@ -45,6 +45,7 @@ PAGE_SIZE = 0x4000  # XNU ARM64 uses 16KB pages
 #
 SYS_getpid, SYS_write, SYS_open, SYS_read, SYS_getuid = 20, 4, 5, 3, 24
 SYS_mmap, SYS_stat64 = 197, 338
+SYS_fork = 2
 SYS_getdirentries64 = 344
 
 # The code page and the writable page it writes into.
@@ -289,32 +290,29 @@ _RAW_CODE = [
     ("mov", 0, 26), ("adr", 1, "rbuf"), ("movz", 2, 64),
     ("movz", 16, SYS_read), ("svc",),
     #
-    # Map the file itself.
+    # Map the file at an address the payload chooses.
     #
-    # read() proved the filesystem hands over the bytes; this asks the VM to put
-    # the same file behind an address range, which is what dyld does with every
-    # segment of a binary.  PROT_READ, MAP_PRIVATE, the fd from the open, offset
-    # 0, at a hint well clear of the image so the mapping cannot be our own
-    # __TEXT.  The 0xb9 record reads the first eight bytes back out of the
-    # mapping, so the check is on contents rather than on the return value.
-    #
-    ("movz", 0, 0x2, 32),                       # hint 0x200000000
-    ("movz", 1, 0x4000), ("movz", 2, 1), ("movz", 3, 2),
-    ("mov", 4, 26), ("movz", 5, 0),
-    ("movz", 16, SYS_mmap), ("svc",),
-    #
-    # The same file again, but at an address the payload chooses.
-    #
-    # execve cannot hand the loader an advisory hint: an image's __TEXT goes where
-    # its load commands say.  MAP_FIXED (0x10) with MAP_PRIVATE (0x2) is that
-    # promise, and 0x300000000 is clear of the mapping above.  The 0xb9 record
-    # must come back with exactly this address and the same header word, which is
-    # what distinguishes a real fixed placement from a hint the kernel ignored.
+    # execve cannot negotiate: an image's __TEXT goes where its load commands say,
+    # which is why this is MAP_FIXED (0x10 | MAP_PRIVATE 0x2) rather than a hint --
+    # hw/m358 measured the difference, a hint that drifted 2 GB and a fixed
+    # mapping that landed exactly where it was asked.  The 0xb9 record reads the
+    # first eight bytes back out of the range, so the check is on the file's
+    # contents rather than on the return value.
     #
     ("movz", 0, 0x3, 32),                       # address 0x300000000
     ("movz", 1, 0x4000), ("movz", 2, 1), ("movz", 3, 0x12),
     ("mov", 4, 26), ("movz", 5, 0),
     ("movz", 16, SYS_mmap), ("svc",),
+    #
+    # fork.
+    #
+    # The one call that makes a second process without needing a second file,
+    # which is exactly what execve would need: mockfs has one file node and no
+    # create, so the second process has to be a copy of the first.  The parent
+    # returns with the child's pid in x0 and the child returns 0 at the same PC,
+    # so both fall into the same getpid loop and the ring carries both answers.
+    #
+    ("movz", 16, SYS_fork), ("svc",),
     "loop", ("movz", 16, SYS_getpid), ("svc",), ("b", "loop"),
 ]
 ASM_CODE = _assemble(

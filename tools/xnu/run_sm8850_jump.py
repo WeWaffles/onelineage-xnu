@@ -198,7 +198,7 @@ def main() -> int:
     note("building image")
     for cmd in (
         f"python3 tools/xnu/mk_sm8850_adt.py build/sm8850_xnu_v22.adt "
-        f"--ramdisk build/sweet_init_v23.macho --phys-base 0x{base:x} "
+        f"--ramdisk build/sweet_init_v24.macho --phys-base 0x{base:x} "
         f"--mem-size 0x8000000",
         f"python3 tools/xnu/build_payload.py "
         f"build/xnu-build/sym/kernel.development.sweet "
@@ -206,7 +206,7 @@ def main() -> int:
         f"--cmdline 'debug=0xc serial=3 cpus=1 keepsyms=1 rd=md0 "
         f"cs_enforcement_disable=1'",
         f"python3 tools/xnu/build_sm8850_image.py build/sweet_sm8850_v22.bin "
-        f"build/sm8850_image_v22.bin --ramdisk build/sweet_init_v23.macho",
+        f"build/sm8850_image_v22.bin --ramdisk build/sweet_init_v24.macho",
     ):
         rc, txt = sh(f"cd {repo} && {cmd}", timeout=300)
         if rc:
