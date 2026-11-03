@@ -23,6 +23,8 @@ import time
 # 9 runs at 0xb7400000 did (RUNLOG.md, 2026-11-03).  Spending a jump on a shifted
 # window measures nothing, so refuse unless the caller says otherwise.
 EXPECTED_BASE = 0xB7400000
+REGION_LO = 0xB7400000
+REGION_HI = 0xBC000000
 
 
 def sh(cmd: str, timeout: int = 120) -> tuple[int, str]:
@@ -145,20 +147,29 @@ def main() -> int:
     # olxnu_payload2_mod_v21 shifts its block up to a 2 MB boundary, which is
     # what makes this hold for whatever CMA hands back.
     #
-    if base & ((2 << 20) - 1):
+    #
+    # Region as well as alignment.  hw/m327 fell back to alloc_contig_range()
+    # and handed back 0xabd000000 -- aligned, but nowhere near the CMA area the
+    # working runs use -- and in that window the evidence ring never formed at
+    # all (no OLXNSS01 tag), so the jump answered nothing while still costing
+    # one.  The window has only ever worked inside these bounds.
+    #
+    aligned = not (base & ((2 << 20) - 1))
+    in_region = REGION_LO <= base < REGION_HI
+    from_cma = "alloc_method=cma_alloc" in info
+    if not (aligned and in_region and from_cma):
         if not args.allow_any_base:
-            note(f"ERROR: payload base {base:#x} is not 2 MB aligned "
-                 f"(window runs would produce no records; rerun, or pass "
-                 f"--allow-any-base)")
+            note(f"ERROR: payload base {base:#x} is not usable "
+                 f"(aligned={aligned}, in_region={in_region}, cma={from_cma}); "
+                 f"rerun, or pass --allow-any-base")
             (out / "driver.log").write_text("\n".join(log) + "\n")
             return 1
-        note(f"WARNING: payload base {base:#x} is not 2 MB aligned; "
+        note(f"WARNING: payload base {base:#x} is not the usual window "
+             f"(aligned={aligned}, in_region={in_region}, cma={from_cma}); "
              f"continuing because --allow-any-base")
     elif base != EXPECTED_BASE:
         note(f"NOTE: payload base {base:#x} is aligned and differs from the "
              f"historical {EXPECTED_BASE:#x}; every address derives from it")
-    if "alloc_contig_range(owned)" not in info:
-        note("WARNING: window is not owned — run may be unreliable")
 
     #
     # Publish the kernel that was just built.
