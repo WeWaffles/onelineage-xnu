@@ -180,9 +180,9 @@ def _assemble(insns: list, blobs: dict, abs_labels: dict = None,
 
 MSG = b"XNU_EL0_OK\n"
 PATH = b"/dev/console\x00"
-ROOTPATH = b"/\x00"
+LAUNCHDPATH = b"/launchd\x00"
 
-_BLOBS = {"msg": MSG, "path": PATH, "rootpath": ROOTPATH}
+_BLOBS = {"msg": MSG, "path": PATH, "launchdpath": LAUNCHDPATH}
 
 _RAW_CODE = [
     #
@@ -300,17 +300,18 @@ _RAW_CODE = [
     ("movz", 6, 0x100), ("movz", 7, 0),
     ("movn", 16, 46), ("svc",),                 # 47  receive
     #
-    # readdir("/").  stat64 proved namei can resolve a path and that the kernel
-    # fills a page this process owns; a directory read is the other half of the
-    # VFS surface dyld and launchd need, and its result is the number of bytes
-    # the filesystem handed back.  hw/m353 tried "/dev" and got ENOENT from the
-    # open, so the root is probed instead: the root node must exist for
-    # "/dev/console" to have resolved at all.
+    # Read the image the boot was started from.
     #
-    ("movz", 16, SYS_open), ("adr", 0, "rootpath"), ("movz", 1, 0), ("svc",),
+    # mockfs resolves exactly three names in its root: "sbin" (itself), "dev"
+    # (the devfs mountpoint) and "launchd", the file node backed by the ramdisk.
+    # Directories are not openable and readdir is unimplemented, so the file node
+    # is the one thing worth opening -- and its first eight bytes are the Mach-O
+    # header of this very image, which no other call in the payload can produce.
+    #
+    ("movz", 16, SYS_open), ("adr", 0, "launchdpath"), ("movz", 1, 0), ("svc",),
     ("mov", 26, 0),
-    ("mov", 0, 26), ("adr", 1, "rbuf"), ("movz", 2, 0x200), ("adr", 3, "basep"),
-    ("movz", 16, SYS_getdirentries64), ("svc",),
+    ("mov", 0, 26), ("adr", 1, "rbuf"), ("movz", 2, 64),
+    ("movz", 16, SYS_read), ("svc",),
     "loop", ("movz", 16, SYS_getpid), ("svc",), ("b", "loop"),
 ]
 ASM_CODE = _assemble(
@@ -323,7 +324,15 @@ ASM_CODE = _assemble(
     code_va=CODE_VA)
 
 # Pad code + data to 16-byte alignment
-PAYLOAD = ASM_CODE + MSG + PATH
+#
+# Every blob, in the same order _assemble() laid out their labels.  This used to
+# read `ASM_CODE + MSG + PATH`, which silently dropped any blob added later: the
+# adr still pointed at the label's offset, so the payload read zeros past the end
+# of the image and handed the kernel an empty path.  That is what hw/m353, m354
+# and m355 recorded as ENOENT for "/dev", "/" and "/launchd" -- three paths that
+# were never actually passed.  Building the payload from the dict keeps the two
+# orders from drifting apart again.
+PAYLOAD = ASM_CODE + b"".join(_BLOBS.values())
 PAYLOAD += b'\x00' * ((-len(PAYLOAD)) & 15)
 
 
