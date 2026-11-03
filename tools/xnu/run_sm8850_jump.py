@@ -55,7 +55,7 @@ def main() -> int:
     ap.add_argument("--repo", type=pathlib.Path,
                     default=pathlib.Path("/Users/waffles/onelineage-xnu"))
     ap.add_argument("--allow-any-base", action="store_true",
-                    help="jump even if the payload base is not 0xb7400000")
+                    help="jump even if the payload base is not 2 MB aligned")
     args = ap.parse_args()
 
     out = args.outdir
@@ -135,15 +135,28 @@ def main() -> int:
         (out / "driver.log").write_text("\n".join(log) + "\n")
         return 1
     base = int(m.group(1), 16)
-    if base != EXPECTED_BASE:
+
+    #
+    # Alignment is the precondition, not the exact address.  Every run whose
+    # window started 0x4000 into a 2 MB block produced no records (8 of 8),
+    # while aligned runs worked -- but the image builder takes --phys-base and
+    # derives boot_args, entry, framebuffer and the ADT from it (checked below
+    # at "payload phys_base"), so any aligned address is self-consistent.
+    # olxnu_payload2_mod_v21 shifts its block up to a 2 MB boundary, which is
+    # what makes this hold for whatever CMA hands back.
+    #
+    if base & ((2 << 20) - 1):
         if not args.allow_any_base:
-            note(f"ERROR: payload base {base:#x} != {EXPECTED_BASE:#x} "
-                 f"(shifted window; reload the payload module and rerun, or "
-                 f"pass --allow-any-base)")
+            note(f"ERROR: payload base {base:#x} is not 2 MB aligned "
+                 f"(window runs would produce no records; rerun, or pass "
+                 f"--allow-any-base)")
             (out / "driver.log").write_text("\n".join(log) + "\n")
             return 1
-        note(f"WARNING: payload base {base:#x} is not the expected "
-             f"{EXPECTED_BASE:#x}; continuing because --allow-any-base")
+        note(f"WARNING: payload base {base:#x} is not 2 MB aligned; "
+             f"continuing because --allow-any-base")
+    elif base != EXPECTED_BASE:
+        note(f"NOTE: payload base {base:#x} is aligned and differs from the "
+             f"historical {EXPECTED_BASE:#x}; every address derives from it")
     if "alloc_contig_range(owned)" not in info:
         note("WARNING: window is not owned — run may be unreliable")
 
