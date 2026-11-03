@@ -77,6 +77,13 @@ def _ldr32(rt: int, rn: int, off: int) -> int:
     return 0xB9400000 | ((off // 4) << 10) | (rn << 5) | rt
 
 
+def _lsl(rd: int, rn: int, shift: int) -> int:
+    """lsl <xd>, <xn>, #shift  (UBFM with imms = 63-shift, immr = 64-shift)."""
+    assert 1 <= shift <= 63
+    return (0xD3400000 | ((63 - shift) << 10) | (((64 - shift) & 63) << 16)
+            | (rn << 5) | rd)
+
+
 def _str32(rt: int, rn: int, off: int) -> int:
     """str <wt>, [<xn>, #off]  (32-bit, unsigned immediate, off a multiple of 4)."""
     assert off % 4 == 0
@@ -143,6 +150,8 @@ def _assemble(insns: list, blobs: dict, abs_labels: dict = None,
             out += struct.pack("<I", _ldr32(ins[1], ins[2], ins[3]))
         elif kind == "str32":
             out += struct.pack("<I", _str32(ins[1], ins[2], ins[3]))
+        elif kind == "lsl":
+            out += struct.pack("<I", _lsl(ins[1], ins[2], ins[3]))
         elif kind == "movn":
             out += struct.pack("<I", _movn(ins[1], ins[2]))
         elif kind == "svc":
@@ -236,45 +245,63 @@ _RAW_CODE = [
     #
     ("movn", 16, 27), ("svc",),            # 28 task_self
     ("mov", 24, 0),
-    ("movn", 16, 28), ("svc",),            # 29 host_self
     #
-    # A receive right, then a send right for it, then a message that goes out
-    # and comes back.  This is the mechanism launchd is built on: a port it
-    # owns, a right to send to it, and mach_msg carrying the payload.
+    # A receive right, a send right for it, and a message that goes out and comes
+    # back through two mach_msg2 calls: the mechanism launchd is built on.
     #
-    #   16 mach_port_allocate(task, MACH_PORT_RIGHT_RECEIVE, &name)
-    #   21 mach_port_insert_right(task, name, name, MACH_MSG_TYPE_MAKE_SEND)
-    #   31 mach_msg(header, MACH_SEND_MSG|MACH_RCV_MSG, 28, 28, name, 0, 0)
+    #   16  mach_port_allocate(task, MACH_PORT_RIGHT_RECEIVE, &name)
+    #   21  mach_port_insert_right(task, name, name, MACH_MSG_TYPE_MAKE_SEND)
+    #   47  mach_msg2_trap  -- the entry point a platform binary must use
+    #
+    # Legacy trap 31 is refused outright for a platform binary
+    # (mach_msg_legacy_allowed), which is the KERN_NOT_SUPPORTED 0x2e that
+    # hw/m348 and hw/m350 recorded; trap 47 is the documented replacement.
     #
     ("mov", 0, 24), ("movz", 1, 1), ("adr", 2, "portname"),
-    ("movn", 16, 15), ("svc",),
+    ("movn", 16, 15), ("svc",),                 # 16  allocate receive right
     ("adr", 22, "portname"), ("ldr32", 21, 22, 0),
-    # MACH_MSG_TYPE_MAKE_SEND is 20 (mach/message.h), not 0: hw/m348 passed 0 and
-    # got KERN_INVALID_RIGHT (0x11) back from the fastpath, which only accepts the
-    # named MAKE_SEND/COPY_SEND forms.
     ("mov", 0, 24), ("mov", 1, 21), ("mov", 2, 21), ("movz", 3, 20),
-    ("movn", 16, 20), ("svc",),
+    ("movn", 16, 20), ("svc",),                 # 21  MAKE_SEND is 20, not 0
     #
-    # struct { msgh_bits, msgh_size, msgh_remote_port, msgh_local_port,
-    #          msgh_voucher_port, msgh_id } followed by a word of body.
-    #   bits  = MACH_MSGH_BITS(MACH_MSG_TYPE_COPY_SEND, 0) = 0x13
-    #   size  = 24 + 4 = 28, remote = the name, local/voucher = 0, id = 0x10
+    # Send half: msgh_bits = MACH_MSGH_BITS(COPY_SEND, 0) = 0x13, size 28,
+    # remote = the port, local/voucher 0, id 0x10, body 0xdeadbeef.
     #
     ("adr", 23, "mbox"),
     ("movabs", 5, (28 << 32) | 0x13), ("str", 5, 23, 0),
     ("str", 21, 23, 8),
     ("movabs", 5, 0x10 << 32), ("str", 5, 23, 16),
     ("movabs", 6, 0xdeadbeef), ("str32", 6, 23, 24),
-    ("mov", 0, 23), ("movz", 1, 3), ("movz", 2, 28), ("movz", 3, 28),
-    ("mov", 4, 21), ("movz", 5, 0), ("movz", 6, 0),
-    ("movn", 16, 30), ("svc",),            # 31 mach_msg
+    ("mov", 0, 23),
+    ("movabs", 1, 0x800000001),                 # SEND_MSG | MACH64_SEND_ANY
+    ("movabs", 2, (28 << 32) | 0x13),
+    ("mov", 3, 21), ("movz", 4, 0), ("movz", 5, 0),
+    ("movz", 6, 0), ("movz", 7, 0),
+    ("movn", 16, 46), ("svc",),                 # 47  send
+    #
+    # Receive half, into a buffer this code zeroes first: anything the record
+    # reads back out of it can only have arrived through the port.
+    #
+    ("adr", 25, "rbox"), ("movz", 5, 0),
+    ("str", 5, 25, 0), ("str", 5, 25, 8),
+    ("str", 5, 25, 16), ("str", 5, 25, 24),
+    ("mov", 0, 25), ("movz", 1, 2),             # RCV_MSG
+    ("movz", 2, 0), ("movz", 3, 0), ("movz", 4, 0),
+    ("lsl", 5, 21, 32),                         # rcv_name = the port
+    #
+    # 0x100, not 32: hw/m351 passed exactly the message size (32 for a 28-byte
+    # message) and the receive answered MACH_RCV_TOO_LARGE 0x10004004, so the
+    # kernel's idea of the size it must copy out is bigger than the header we
+    # sent.  The buffer is one page, so giving it room costs nothing.
+    ("movz", 6, 0x100), ("movz", 7, 0),
+    ("movn", 16, 46), ("svc",),                 # 47  receive
     "loop", ("movz", 16, SYS_getpid), ("svc",), ("b", "loop"),
 ]
 ASM_CODE = _assemble(
     [x for ins in _RAW_CODE for x in (_movabs(ins[1], ins[2])
                                      if ins[0] == "movabs" else [ins])],
     _BLOBS,
-    abs_labels={"buf": DATA_VA, "portname": DATA_VA + 0x200, "mbox": DATA_VA + 0x400},
+    abs_labels={"buf": DATA_VA, "portname": DATA_VA + 0x200,
+                "mbox": DATA_VA + 0x400, "rbox": DATA_VA + 0x600},
     code_va=CODE_VA)
 
 # Pad code + data to 16-byte alignment

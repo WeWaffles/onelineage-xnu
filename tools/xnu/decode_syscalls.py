@@ -19,6 +19,8 @@ Record layouts written by bsd/dev/arm/systemcalls.c:
     0xaf  a = code, b = error, c = result, d = arg0
     0xb0  a = st_dev | st_mode << 32 | st_nlink << 48, b = st_ino
     0xb6  a = Mach trap number, b = retval, c = arg1, d = user PC
+          (trap 16: c = the port name it wrote through arg3;
+           trap 31/47: c = msgh_id | first body word << 32)
     0xa7  a = pid, b = proc_pid(current)
     0xa5  a = pid, b = 1 (EL0 entry)
 
