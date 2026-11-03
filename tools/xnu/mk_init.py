@@ -207,14 +207,8 @@ _RAW_CODE = [
     ("movz", 16, SYS_write), ("mov", 0, 19), ("adr", 1, "msg"),
     ("movz", 2, len(MSG)), ("svc",),
 
-    #
-    # stat64 on the console path.
-    #
-    # The anonymous mapping and the store through it are proven (hw/m346,
-    # m352); the file-backed mapping below replaces them, so this call keeps the
-    # devfs node reading that has been stable since hw/m340.
-    #
-    ("movz", 16, SYS_stat64), ("adr", 0, "path"), ("adr", 1, "buf"), ("svc",),
+    # stat64 is dropped from this payload: it has read the same devfs node
+    # (mode 0x2192, ino 0x124) since hw/m340 and the slot is needed below.
     #
     # The Mach side of handle_svc().
     #
@@ -306,6 +300,19 @@ _RAW_CODE = [
     #
     ("movz", 0, 0x2, 32),                       # hint 0x200000000
     ("movz", 1, 0x4000), ("movz", 2, 1), ("movz", 3, 2),
+    ("mov", 4, 26), ("movz", 5, 0),
+    ("movz", 16, SYS_mmap), ("svc",),
+    #
+    # The same file again, but at an address the payload chooses.
+    #
+    # execve cannot hand the loader an advisory hint: an image's __TEXT goes where
+    # its load commands say.  MAP_FIXED (0x10) with MAP_PRIVATE (0x2) is that
+    # promise, and 0x300000000 is clear of the mapping above.  The 0xb9 record
+    # must come back with exactly this address and the same header word, which is
+    # what distinguishes a real fixed placement from a hint the kernel ignored.
+    #
+    ("movz", 0, 0x3, 32),                       # address 0x300000000
+    ("movz", 1, 0x4000), ("movz", 2, 1), ("movz", 3, 0x12),
     ("mov", 4, 26), ("movz", 5, 0),
     ("movz", 16, SYS_mmap), ("svc",),
     "loop", ("movz", 16, SYS_getpid), ("svc",), ("b", "loop"),
