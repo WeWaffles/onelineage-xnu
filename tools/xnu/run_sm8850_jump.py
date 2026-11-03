@@ -17,6 +17,13 @@ import subprocess
 import sys
 import time
 
+# The payload base is a precondition, not a preference.  Every run whose CMA
+# allocation landed at 0xb7404000 (the aligned base + 0x4000) produced no
+# records at all -- m306, m307, m311, m313, m314, m317, m318, m323 -- while 8 of
+# 9 runs at 0xb7400000 did (RUNLOG.md, 2026-11-03).  Spending a jump on a shifted
+# window measures nothing, so refuse unless the caller says otherwise.
+EXPECTED_BASE = 0xB7400000
+
 
 def sh(cmd: str, timeout: int = 120) -> tuple[int, str]:
     try:
@@ -47,6 +54,8 @@ def main() -> int:
     ap.add_argument("outdir", type=pathlib.Path)
     ap.add_argument("--repo", type=pathlib.Path,
                     default=pathlib.Path("/Users/waffles/onelineage-xnu"))
+    ap.add_argument("--allow-any-base", action="store_true",
+                    help="jump even if the payload base is not 0xb7400000")
     args = ap.parse_args()
 
     out = args.outdir
@@ -126,6 +135,15 @@ def main() -> int:
         (out / "driver.log").write_text("\n".join(log) + "\n")
         return 1
     base = int(m.group(1), 16)
+    if base != EXPECTED_BASE:
+        if not args.allow_any_base:
+            note(f"ERROR: payload base {base:#x} != {EXPECTED_BASE:#x} "
+                 f"(shifted window; reload the payload module and rerun, or "
+                 f"pass --allow-any-base)")
+            (out / "driver.log").write_text("\n".join(log) + "\n")
+            return 1
+        note(f"WARNING: payload base {base:#x} is not the expected "
+             f"{EXPECTED_BASE:#x}; continuing because --allow-any-base")
     if "alloc_contig_range(owned)" not in info:
         note("WARNING: window is not owned — run may be unreliable")
 
