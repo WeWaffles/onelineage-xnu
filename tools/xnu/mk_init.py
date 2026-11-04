@@ -44,6 +44,7 @@ PAGE_SIZE = 0x4000  # XNU ARM64 uses 16KB pages
 # the number in x16 and the arguments in x0..x7.
 #
 SYS_getpid, SYS_write, SYS_open, SYS_read, SYS_getuid = 20, 4, 5, 3, 24
+SYS_dup2 = 90
 SYS_mmap, SYS_stat64 = 197, 338
 SYS_fork = 2
 SYS_getdirentries64 = 344
@@ -208,6 +209,18 @@ _RAW_CODE = [
     ("movz", 16, SYS_getpid), ("svc",),
     ("movz", 16, SYS_open), ("adr", 0, "path"), ("movz", 1, 6), ("svc",),
     ("mov", 19, 0),
+    #
+    # m473: give this process a real stdout before anything forks.
+    #
+    # hw/m472 measured the child's write(1, "XNU_EL0\n", 11) returning EBADF with
+    # fd_ofiles[1] NULL while the same program's open("/dev/console") had taken
+    # fd 3, so the descriptor the child was told to write was never installed in
+    # the table it inherited.  dup2 makes fd 1 name the console fileglob this
+    # process opened, in this process's own table, before the fork that copies it.
+    # The duplicate is a syscall like any other, so the kernel stamps it (0xa6)
+    # and the fd probe at 0x8bf8 reports what the child actually holds.
+    #
+    ("mov", 0, 19), ("movz", 1, 1), ("movz", 16, SYS_dup2), ("svc",),
     ("movz", 16, SYS_write), ("mov", 0, 19), ("adr", 1, "msg"),
     ("movz", 2, len(MSG)), ("svc",),
 

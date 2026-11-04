@@ -1,0 +1,127 @@
+--- a/bsd/dev/arm/systemcalls.c
++++ b/bsd/dev/arm/systemcalls.c
+@@ -424,6 +424,52 @@
+ 						    (uint64_t)(uint32_t)pid,
+ 						    uthread->uu_arg[2]);
+ 					}
++				}
++			}
++			/*
++			 * m473: the same write, in slots that cannot rotate.
++			 *
++			 * hw/m472 captured a fresh ring in which 0028's 0xbc/0xbd/0xbe were
++			 * gone: the history ring keeps the newest 16 snapshots and this boot
++			 * reached seq 14932, so the write outcome had been overwritten by
++			 * later launchd traffic.  These two slots are last-write-wins and sit
++			 * clear of every other fixed writer (0x8400 ring, 0x8600 counter,
++			 * 0x8bf8 fd probe, 0x8e00 mmap ring, 0x9000/0x9200 exception
++			 * records, and the 0x600 proof ring up to slot 25 at 0x1f38).
++			 *
++			 *   0x8700  magic, pid, fd | length << 32, result, error
++			 *   0x8740  magic, first 8 bytes at the buffer, match, pid, length
++			 *   0x87c0  writes seen    0x87c8  writes that returned an error
++			 *
++			 * The bytes still come through copyin(); a bad pointer returns
++			 * EFAULT and only the outcome record is written.
++			 */
++			{
++				extern void sweet_early_write64(uint64_t, uint64_t);
++				static unsigned int sweet_w_seen, sweet_w_failed;
++				uint64_t z = 0;
++
++				if (copyin((user_addr_t)uthread->uu_arg[1], &z,
++				    sizeof(z)) == 0) {
++					sweet_early_write64(0x8740, 0x4f4c584eULL);
++					sweet_early_write64(0x8748, z);
++					sweet_early_write64(0x8750,
++					    (z == 0x0a304c455f554e58ULL) ? 1 : 0);
++					sweet_early_write64(0x8758,
++					    (uint64_t)(uint32_t)pid);
++					sweet_early_write64(0x8760, uthread->uu_arg[2]);
++				}
++				sweet_early_write64(0x8700, 0x4f4c584eULL);
++				sweet_early_write64(0x8708, (uint64_t)(uint32_t)pid);
++				sweet_early_write64(0x8710,
++				    (uint64_t)(uint32_t)uthread->uu_arg[0] |
++				    ((uint64_t)(uint32_t)uthread->uu_arg[2] << 32));
++				sweet_early_write64(0x8718, SWEET_RVAL64(uthread));
++				sweet_early_write64(0x8720, (uint64_t)(uint32_t)error);
++				sweet_early_write64(0x87c0, (uint64_t)++sweet_w_seen);
++				if (error != 0) {
++					sweet_early_write64(0x87c8,
++					    (uint64_t)++sweet_w_failed);
+ 				}
+ 			}
+ 			/*
+--- a/bsd/kern/kern_fork.c
++++ b/bsd/kern/kern_fork.c
+@@ -637,6 +637,46 @@
+ 				sweet_early_evidence(0xbe,
+ 				    (uint64_t)(uint32_t)proc_getpid(child_proc),
+ 				    (uint64_t)(uint32_t)proc_getpid(parent_proc), 0, 0);
++			}
++			/*
++			 * m473: the child's descriptor table at the instant it exists, in a
++			 * slot that cannot rotate (0x8780, clear of every other fixed
++			 * writer; see the write slots in bsd/dev/arm/systemcalls.c).
++			 *
++			 *   0x8780  magic, child pid, parent pid, child fd_afterlast,
++			 *           stdio presence bits (bit0 fd0, bit1 fd1, bit2 fd2)
++			 *   0x87a8  forks recorded
++			 *
++			 * This is the inheritance question asked of the child's own table
++			 * instead of inferred from the parent's, so a child write that
++			 * answers EBADF is localised to the fork or to what happened after
++			 * it rather than to both at once.
++			 */
++			{
++				extern void sweet_early_write64(uint64_t, uint64_t);
++				static unsigned int sweet_fork_slots;
++				struct filedesc *cdp = &child_proc->p_fd;
++				uint64_t bits = 0;
++				unsigned int fi;
++
++				if (cdp->fd_ofiles != NULL) {
++					for (fi = 0; fi < 3; fi++) {
++						if (fi < cdp->fd_nfiles &&
++						    cdp->fd_ofiles[fi] != NULL) {
++							bits |= 1ULL << fi;
++						}
++					}
++				}
++				sweet_early_write64(0x8780, 0x4f4c584eULL);
++				sweet_early_write64(0x8788,
++				    (uint64_t)(uint32_t)proc_getpid(child_proc));
++				sweet_early_write64(0x8790,
++				    (uint64_t)(uint32_t)proc_getpid(parent_proc));
++				sweet_early_write64(0x8798,
++				    (uint64_t)(uint32_t)cdp->fd_afterlast);
++				sweet_early_write64(0x87a0, bits);
++				sweet_early_write64(0x87a8,
++				    (uint64_t)++sweet_fork_slots);
+ 			}
+ 		}
+ 
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -6923,6 +6923,20 @@
+ 	fg->fg_flag = FREAD | FWRITE;
+ 	fg->fg_ops = &vnops;
+ 	fp_set_data(fp, ndp->ni_vp);
++	/*
++	 * m473: falloc() hands back a *reserved* descriptor -- fdalloc() marks
++	 * the slot UF_RESERVED and the caller is expected to settle it.  This
++	 * helper never did, and fdt_fork() skips exactly those slots, so PID 1
++	 * could use fds 0/1/2 while the child it forked got NULL there: hw/m472
++	 * measured the child's write(1) returning EBADF with fd_ofiles[1] empty
++	 * in a table whose fd_afterlast was still 5.  Releasing the reservation
++	 * settles the slot so the fork copies it, and lets a later dup2 onto
++	 * these descriptors complete instead of waiting for the flag to clear.
++	 */
++	proc_fdlock(p);
++	procfdtbl_releasefd(p, indx, NULL);
++	fp_drop(p, indx, fp, 1);
++	proc_fdunlock(p);
+ 	vnode_put(ndp->ni_vp);
+ 	kfree_type(struct nameidata, ndp);
+ 	sweet_proof_write_slot(slotno, 0xF5, (uint64_t)indx, (uint64_t)fg->fg_flag, 0,
