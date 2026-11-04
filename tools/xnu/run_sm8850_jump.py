@@ -59,7 +59,9 @@ def main() -> int:
     ap.add_argument("--allow-any-base", action="store_true",
                     help="jump even if the payload base is not 2 MB aligned")
     ap.add_argument("--load-only", action="store_true",
-                    help="load the module (writes XNUJMP1) and stop before go")
+                    help="load the module and stop before go")
+    ap.add_argument("--module", default="olxnu_jump2_mod_v20.ko",
+                    help="jump module .ko to load from /data/local/tmp/olxnu")
     args = ap.parse_args()
 
     out = args.outdir
@@ -256,7 +258,7 @@ def main() -> int:
                   f"skip={first_data} seek={first_data} 2>&1 | tail -1")
     note(f"dd rc={rc} {txt[-200:]}")
 
-    rc, txt = adb(                f"insmod /data/local/tmp/olxnu/olxnu_jump2_mod_v20.ko "
+    rc, txt = adb(                f"insmod /data/local/tmp/olxnu/{args.module} "
         f"proc_name=olxnu_jump2 payload_pa=0x{base:x} payload_size=0x{size:x} "
         f"entry_pa=0x{entry:x} boot_args_pa=0x{ba:x} fb_pa=0x{fb:x} "
         f"fb_size=0x{fb_size:x}")
