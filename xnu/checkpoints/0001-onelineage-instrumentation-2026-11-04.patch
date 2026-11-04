@@ -6287,8 +6287,8 @@ diff -ruN a/osfmk/arm64/sweet_early.h build/xnu-src/source/osfmk/arm64/sweet_ear
  
 diff -ruN a/osfmk/arm64/sweet_smmu.c build/xnu-src/source/osfmk/arm64/sweet_smmu.c
 --- a/osfmk/arm64/sweet_smmu.c	1969-12-31 16:00:00
-+++ build/xnu-src/source/osfmk/arm64/sweet_smmu.c	2026-11-03 10:03:16
-@@ -0,0 +1,808 @@
++++ build/xnu-src/source/osfmk/arm64/sweet_smmu.c	2026-11-03 20:44:17
+@@ -0,0 +1,826 @@
 +/*
 + * sweet_smmu.c -- survey the apps SMMU and repoint the display's scanout.
 + *
@@ -7094,6 +7094,24 @@ diff -ruN a/osfmk/arm64/sweet_smmu.c build/xnu-src/source/osfmk/arm64/sweet_smmu
 +void
 +sweet_smmu_survey(void)
 +{
++}
++
++
++/*
++ * sweet_smmu_display_pa_qemu_stub: pe_serial.c calls these on every target, but
++ * the survey they belong to exists only in the phone configuration.  Zero is the
++ * survey's own "nothing found" answer, so fbcon falls back to the ADT buffer.
++ */
++uint64_t
++sweet_smmu_display_pa(void)
++{
++	return 0;
++}
++
++uint64_t
++sweet_smmu_display_bytes(void)
++{
++	return 0;
 +}
 +
 +#endif
@@ -9826,7 +9844,7 @@ diff -ruN a/pexpert/pexpert/arm/protos.h build/xnu-src/source/pexpert/pexpert/ar
  int switch_to_serial_console(void);
 diff -ruN a/pexpert/pexpert/arm64/SWEET.h build/xnu-src/source/pexpert/pexpert/arm64/SWEET.h
 --- a/pexpert/pexpert/arm64/SWEET.h	2026-11-03 17:51:44
-+++ build/xnu-src/source/pexpert/pexpert/arm64/SWEET.h	2026-11-02 11:14:24
++++ build/xnu-src/source/pexpert/pexpert/arm64/SWEET.h	2026-11-03 20:48:10
 @@ -26,8 +26,49 @@
  #define __ARM_ENABLE_SWAP__       1
  #define __ARM_V8_CRYPTO_EXTENSIONS__ 1
