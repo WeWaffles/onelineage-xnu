@@ -1,0 +1,31 @@
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -2768,6 +2768,14 @@
+ 			sweet_early_write64(0x9610,
+ 			    (uint64_t)(uint32_t)proc_getpid(pp));
+ 			sweet_early_write64(0x9600, 0x454b4157ULL);
++			{
++				extern void sweet_trace_record(uint64_t, uint64_t,
++				    uint64_t, uint64_t);
++
++				sweet_trace_record(0x9680,
++				    (uint64_t)(uint32_t)pid,
++				    (uint64_t)(uintptr_t)pp, 0x57415557ULL);
++			}
+ 		}
+ 	} else {
+ 		/* should be fine as parent proc would be initproc */
+@@ -3244,6 +3252,13 @@
+ 		sweet_early_write64(0x9620, 0x50454c53ULL);
+ 	}
+ 	thread_set_pending_block_hint(current_thread(), kThreadWaitOnProcess);
++	{
++		extern void sweet_trace_record(uint64_t, uint64_t, uint64_t,
++		    uint64_t);
++
++		sweet_trace_record(0x9660, (uint64_t)(uint32_t)proc_getpid(q),
++		    (uint64_t)(uintptr_t)q, 0x50454c53ULL);
++	}
+ 	if ((error = msleep0((caddr_t)q, &proc_list_mlock, PWAIT | PCATCH | PDROP, "wait", 0, wait1continue))) {
+ 		return error;
+ 	}

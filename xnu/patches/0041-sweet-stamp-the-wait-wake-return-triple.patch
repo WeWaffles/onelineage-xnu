@@ -1,0 +1,51 @@
+--- a/bsd/dev/arm/systemcalls.c
++++ b/bsd/dev/arm/systemcalls.c
+@@ -545,6 +545,8 @@
+ 					sweet_wait_pid, sweet_wait_reaped;
+ 					extern unsigned int sweet_wait_status,
+ 					sweet_wait_error;
++					extern void sweet_trace_record(uint64_t,
++					    uint64_t, uint64_t, uint64_t);
+ 					int wst = 0;
+ 
+ 					if (uthread->uu_arg[1] != 0) {
+@@ -557,6 +559,9 @@
+ 					    (unsigned int)SWEET_RVAL64(uthread);
+ 					sweet_wait_status = (unsigned int)wst;
+ 					sweet_wait_error = (unsigned int)error;
++					sweet_trace_record(0x96a0,
++					    (uint64_t)(uint32_t)pid,
++					    SWEET_RVAL64(uthread), 0x544552ULL);
+ 				}
+ 			}
+ 			/*
+@@ -1384,3 +1389,29 @@
+ 	sweet_early_write64(0x9568, (uint64_t)sweet_wait_calls);
+ 	sweet_early_write64(0x9570, 0x44494c4156ULL);
+ }
++
++/*
++ * m485: one monotonic sequence across the wait/wake/return triple.
++ *
++ * hw/m484 showed wait4 sleeping and the exiting child waking the same address,
++ * yet no return, so the next question is order of events rather than identity
++ * of the object.  Each record carries the sequence number it was stamped with,
++ * the values that identify the event, and its magic written last:
++ *
++ *   0x9660  wait goes to sleep:  seq, waiter pid, sleep address, "SLEP"
++ *   0x9680  child wakes parent:  seq, exiting pid, parent proc, "WAUW"
++ *   0x96a0  wait4 returns:       seq, caller pid, reaped rval, "RET"
++ */
++unsigned int sweet_trace_seq;
++
++void
++sweet_trace_record(uint64_t base, uint64_t a, uint64_t b, uint64_t magic)
++{
++	extern void sweet_early_write64(uint64_t, uint64_t);
++	unsigned int s = ++sweet_trace_seq;
++
++	sweet_early_write64(base, (uint64_t)s);
++	sweet_early_write64(base + 8, a);
++	sweet_early_write64(base + 0x10, b);
++	sweet_early_write64(base + 0x18, magic);
++}
