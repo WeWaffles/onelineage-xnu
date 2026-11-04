@@ -38,6 +38,7 @@ def main() -> int:
     ap.add_argument("--arm-text", default="jumping")
     ap.add_argument("--timeout", type=float, default=150.0)
     ap.add_argument("--interval", type=float, default=0.5)
+    ap.add_argument("--min-bytes", type=int, default=1_000_000)
     a = ap.parse_args()
     a.outdir.mkdir(parents=True, exist_ok=True)
     aa = (0xAA13).to_bytes(8, "little")
@@ -59,7 +60,9 @@ def main() -> int:
             continue
         d = read_ring()
         reads += 1
-        if d is None:
+        # A device mid-reset answers with a truncated buffer (m464 saw 46 bytes)
+        # and rc=0, which is not a ring; require a full-size read.
+        if d is None or len(d) < a.min_bytes:
             time.sleep(a.interval)
             continue
         h = hashlib.sha256(d).hexdigest()
