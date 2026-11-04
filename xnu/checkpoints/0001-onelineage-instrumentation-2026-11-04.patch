@@ -815,7 +815,7 @@ diff -ruN a/bsd/kern/kern_exec.c build/xnu-src/source/bsd/kern/kern_exec.c
  	 * Prefault executable or dyld entry point.
 diff -ruN a/bsd/kern/kern_exit.c build/xnu-src/source/bsd/kern/kern_exit.c
 --- a/bsd/kern/kern_exit.c	2023-08-13 22:06:07
-+++ build/xnu-src/source/bsd/kern/kern_exit.c	2026-11-03 18:19:50
++++ build/xnu-src/source/bsd/kern/kern_exit.c	2026-11-03 18:44:16
 @@ -72,6 +72,7 @@
   * Version 2.0.
   */
@@ -966,6 +966,136 @@ diff -ruN a/bsd/kern/kern_exit.c build/xnu-src/source/bsd/kern/kern_exit.c
  	exitval = p->p_xstat;
  	KERNEL_DEBUG_CONSTANT_IST(KDEBUG_COMMON,
  	    BSDDBG_CODE(DBG_BSD_PROC, BSD_PROC_EXIT) | DBG_FUNC_START,
+@@ -2156,7 +2252,22 @@
+ 	 */
+ 
+ 	proc_refdrain(p);
++	/*
++	 * 0xd9: proc_refdrain returned.
++	 *
++	 *   0xd9
++	 */
++	{
++		static int sweet_d9_records;
+ 
++		if (sweet_d9_records < 6) {
++			sweet_d9_records++;
++			sweet_early_evidence(0xd9, (uint64_t)proc_getpid(p),
++			    (uint64_t)thread_tid(current_thread()), 0, 0);
++		}
++	}
++
++
+ 	/* if any pending cpu limits action, clear it */
+ 	task_clear_cpuusage(proc_task(p), TRUE);
+ 
+@@ -2169,12 +2280,42 @@
+ 	 * This may block!
+ 	 */
+ 	fdt_invalidate(p);
++	/*
++	 * 0xda: fdt_invalidate returned.
++	 *
++	 *   0xda
++	 */
++	{
++		static int sweet_da_records;
+ 
++		if (sweet_da_records < 6) {
++			sweet_da_records++;
++			sweet_early_evidence(0xda, (uint64_t)proc_getpid(p),
++			    (uint64_t)thread_tid(current_thread()), 0, 0);
++		}
++	}
++
++
+ 	/*
+ 	 * Once all the knotes, kqueues & workloops are destroyed, get rid of the
+ 	 * workqueue.
+ 	 */
+ 	workq_exit(p);
++	/*
++	 * 0xdb: workq_exit returned.
++	 *
++	 *   0xdb
++	 */
++	{
++		static int sweet_db_records;
++
++		if (sweet_db_records < 6) {
++			sweet_db_records++;
++			sweet_early_evidence(0xdb, (uint64_t)proc_getpid(p),
++			    (uint64_t)thread_tid(current_thread()), 0, 0);
++		}
++	}
++
+ 
+ 	if (uth->uu_lowpri_window) {
+ 		/*
+diff -ruN a/bsd/kern/kern_proc.c build/xnu-src/source/bsd/kern/kern_proc.c
+--- a/bsd/kern/kern_proc.c	2023-08-13 22:06:07
++++ build/xnu-src/source/bsd/kern/kern_proc.c	2026-11-03 18:35:03
+@@ -77,6 +77,7 @@
+ 
+ 
+ #include <sys/param.h>
++#include <arm64/sweet_early.h>
+ #include <sys/systm.h>
+ #include <sys/kernel.h>
+ #include <sys/proc_internal.h>
+@@ -819,13 +820,52 @@
+ proc_refdrain(proc_t p)
+ {
+ 	uint32_t bits = os_ref_get_raw_mask(&p->p_refcount);
++	/*
++	 * hw/m384: entry count. b>1 means a holder remains.
++	 *
++	 *   0xdc
++	 */
++	{
++		static int sweet_dc_records;
+ 
++		if (sweet_dc_records < 6) {
++			sweet_dc_records++;
++			sweet_early_evidence(0xdc, (uint64_t)bits, (uint64_t)(bits >> P_REF_BITS), (uint64_t)proc_getpid(p), 0);
++		}
++	}
++
+ 	assert(proc_list_exited(p));
+ 
+ 	while ((bits >> P_REF_BITS) > 1) {
+ 		if (os_atomic_cmpxchgv(&p->p_refcount, bits,
+ 		    bits | P_REF_DRAINING, &bits, relaxed)) {
++			/*
++			 * 0xdd: about to sleep on the reference count.
++			 *
++			 *   0xdd
++			 */
++			{
++				static int sweet_dd_records;
++
++				if (sweet_dd_records < 6) {
++					sweet_dd_records++;
++					sweet_early_evidence(0xdd, (uint64_t)bits, (uint64_t)(bits >> P_REF_BITS), (uint64_t)proc_getpid(p), 0);
++				}
++			}
+ 			proc_ref_wait(p, &p->p_refcount, P_REF_DRAINING, false);
++			/*
++			 * 0xde: the wait returned; bits is the stale snapshot.
++			 *
++			 *   0xde
++			 */
++			{
++				static int sweet_de_records;
++
++				if (sweet_de_records < 6) {
++					sweet_de_records++;
++					sweet_early_evidence(0xde, (uint64_t)bits, (uint64_t)(bits >> P_REF_BITS), (uint64_t)proc_getpid(p), 0);
++				}
++			}
+ 		}
+ 	}
+ }
 diff -ruN a/bsd/kern/mach_loader.c build/xnu-src/source/bsd/kern/mach_loader.c
 --- a/bsd/kern/mach_loader.c	2023-08-13 22:06:07
 +++ build/xnu-src/source/bsd/kern/mach_loader.c	2026-11-01 20:01:33
@@ -6920,16 +7050,17 @@ diff -ruN a/osfmk/console/video_console.c build/xnu-src/source/osfmk/console/vid
  		// Adjust the video buffer pointer to point to where it is in high virtual (above the hole)
 diff -ruN a/osfmk/kern/ast.c build/xnu-src/source/osfmk/kern/ast.c
 --- a/osfmk/kern/ast.c	2023-08-13 22:06:07
-+++ build/xnu-src/source/osfmk/kern/ast.c	2026-11-03 17:09:49
-@@ -54,6 +54,7 @@
++++ build/xnu-src/source/osfmk/kern/ast.c	2026-11-03 18:44:16
+@@ -54,6 +54,8 @@
   * the rights to redistribute these changes.
   */
  
 +#include <arm64/sweet_early.h>
++extern int sweet_fork_seen;
  #include <kern/ast.h>
  #include <kern/counter.h>
  #include <kern/cpu_quiesce.h>
-@@ -110,6 +111,24 @@
+@@ -110,6 +112,24 @@
  void
  ast_taken_kernel(void)
  {
@@ -6944,7 +7075,7 @@ diff -ruN a/osfmk/kern/ast.c build/xnu-src/source/osfmk/kern/ast.c
 +	{
 +		static int sweet_ast_kernel_records;
 +
-+		if (sweet_ast_kernel_records < 8) {
++		if (sweet_fork_seen && sweet_ast_kernel_records < 8) {
 +			sweet_ast_kernel_records++;
 +			sweet_early_evidence(0xc7, (uint64_t)ast_peek(AST_ALL),
 +			    (uint64_t)sweet_ast_kernel_records, 0, 0);
@@ -6954,7 +7085,23 @@ diff -ruN a/osfmk/kern/ast.c build/xnu-src/source/osfmk/kern/ast.c
  	assert(ml_get_interrupts_enabled() == FALSE);
  
  	thread_t thread = current_thread();
-@@ -156,6 +175,27 @@
+@@ -125,6 +145,7 @@
+ 	 * has already been handled, due to races in enable_preemption
+ 	 */
+ 	if (ast_peek(AST_URGENT) != AST_URGENT) {
++		sweet_early_evidence(0xe1, 1, (uint64_t)thread->thread_id, 0, 0);
+ 		return;
+ 	}
+ 
+@@ -133,6 +154,7 @@
+ 	 * TODO: the thread can cheese this with clear_wait()
+ 	 */
+ 	if (waitq_wait_possible(thread) == FALSE) {
++		sweet_early_evidence(0xe1, 2, (uint64_t)thread->thread_id, 0, 0);
+ 		/* Consume AST_URGENT or the interrupt will call us again */
+ 		ast_consume(AST_URGENT);
+ 		return;
+@@ -156,6 +178,27 @@
  void
  ast_taken_user(void)
  {
@@ -6972,7 +7119,7 @@ diff -ruN a/osfmk/kern/ast.c build/xnu-src/source/osfmk/kern/ast.c
 +	{
 +		static int sweet_ast_records;
 +
-+		if (sweet_ast_records < 8) {
++		if (sweet_fork_seen && sweet_ast_records < 8) {
 +			sweet_ast_records++;
 +			sweet_early_evidence(0xc5, (uint64_t)ast_peek(AST_ALL),
 +			    (uint64_t)sweet_ast_records, 0, 0);
@@ -7001,16 +7148,17 @@ diff -ruN a/osfmk/kern/debug.c build/xnu-src/source/osfmk/kern/debug.c
  #if defined(__x86_64__) && (DEVELOPMENT || DEBUG)
 diff -ruN a/osfmk/kern/priority.c build/xnu-src/source/osfmk/kern/priority.c
 --- a/osfmk/kern/priority.c	2023-08-13 22:06:07
-+++ build/xnu-src/source/osfmk/kern/priority.c	2026-11-03 18:00:55
-@@ -63,6 +63,7 @@
++++ build/xnu-src/source/osfmk/kern/priority.c	2026-11-03 18:39:44
+@@ -63,6 +63,8 @@
   *	Priority related scheduler bits.
   */
  
 +#include <arm64/sweet_early.h>
++extern int sweet_fork_seen;
  #include <mach/boolean.h>
  #include <mach/kern_return.h>
  #include <mach/machine.h>
-@@ -105,12 +106,41 @@
+@@ -105,12 +107,41 @@
  	ast_t                           preempt;
  	uint64_t                        ctime;
  
@@ -7021,7 +7169,7 @@ diff -ruN a/osfmk/kern/priority.c build/xnu-src/source/osfmk/kern/priority.c
 +	{
 +		static int sweet_qe_records;
 +
-+		if (sweet_qe_records < 4) {
++		if (sweet_fork_seen && sweet_qe_records < 8) {
 +			sweet_qe_records++;
 +			sweet_early_evidence(0xcd, (uint64_t)processor->cpu_id,
 +			    (uint64_t)thread->quantum_remaining,
@@ -7042,7 +7190,7 @@ diff -ruN a/osfmk/kern/priority.c build/xnu-src/source/osfmk/kern/priority.c
 +	{
 +		static int sweet_qa_records;
 +
-+		if (sweet_qa_records < 4) {
++		if (sweet_fork_seen && sweet_qa_records < 8) {
 +			sweet_qa_records++;
 +			sweet_early_evidence(0xca, (uint64_t)thread->quantum_remaining,
 +			    processor->quantum_end, (uint64_t)processor->current_pri, 0);
@@ -7052,7 +7200,7 @@ diff -ruN a/osfmk/kern/priority.c build/xnu-src/source/osfmk/kern/priority.c
  	SCHED_STATS_INC(quantum_timer_expirations);
  
  	/*
-@@ -231,6 +261,21 @@
+@@ -231,6 +262,21 @@
  
  	if ((preempt = csw_check(thread, processor, check_reason)) != AST_NONE) {
  		ast_on(preempt);
@@ -7065,7 +7213,7 @@ diff -ruN a/osfmk/kern/priority.c build/xnu-src/source/osfmk/kern/priority.c
 +	{
 +		static int sweet_qc_records;
 +
-+		if (sweet_qc_records < 4) {
++		if (sweet_fork_seen && sweet_qc_records < 8) {
 +			sweet_qc_records++;
 +			sweet_early_evidence(0xcb, (uint64_t)preempt,
 +			    (uint64_t)processor->current_pri,

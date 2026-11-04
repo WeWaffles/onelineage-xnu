@@ -44,6 +44,18 @@ The recorded tags, in the order they were added:
 | 0xd9 | `bsd/kern/kern_exit.c` | `proc_refdrain` returned |
 | 0xda | `bsd/kern/kern_exit.c` | `fdt_invalidate` returned |
 | 0xdb | `bsd/kern/kern_exit.c` | `workq_exit` returned |
+| 0xdc | `bsd/kern/kern_proc.c` | `proc_refdrain` entry: raw bits, refcount, pid |
+| 0xdd | `bsd/kern/kern_proc.c` | about to sleep on the reference count |
+| 0xde | `bsd/kern/kern_proc.c` | reference wait returned |
+| 0xe1 | `osfmk/kern/ast.c` | `ast_taken_kernel` early return: 1 not urgent, 2 waitq not possible |
+
+**A note on 0xd9–0xdb.** These were listed here before they existed in the
+kernel: the insert used an anchor that no longer matched, the patch script
+aborted, and the build reported success because it built the unchanged tree.
+`hw/m383` was interpreted through records that were not in the binary. They are
+now inserted by line position, verified with `grep`, and part of this patch.
+`0xc5`, `0xc7`, `0xca`, `0xcb`, `0xcd` are gated on `sweet_fork_seen` so their
+caps are not consumed during boot (`hw/m385`).
 
 `0xb6` (trap) is now recorded only after `sweet_fork_seen` and capped at 10, so
 post-fork trap records survive the 16-slot ring and can show the parent
