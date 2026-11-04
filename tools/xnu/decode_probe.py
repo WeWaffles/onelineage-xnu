@@ -163,7 +163,8 @@ def decode(d: bytes) -> dict | None:
             (0x96a0, 0x544552, "return", 0x96a8, 0x96b0),
             (0x96c0, 0x4e453457, "w4entry", 0x96c8, 0x96d0),
             (0x96f0, 0x50414552, "reap", 0x96f8, 0x9700),
-            (0x9720, 0x4e433157, "w1cont", 0x9728, 0x9730)):
+            (0x9720, 0x4e433157, "w1cont", 0x9728, 0x9730),
+            (0x9740, 0x41545358, "xstatus", 0x9748, 0x9750)):
         if g(tbase + 0x18) == tmagic:
             trace.append(dict(seq=g(tbase), event=tname,
                               a=g(taoff), b=g(tboff)))

@@ -1,0 +1,25 @@
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -3150,7 +3150,21 @@
+ 			retval[0] = proc_getpid(p);
+ 			if (uap->status) {
+ 				/* Legacy apps expect only 8 bits of status */
+-				status = 0xffff & p->p_xstat;   /* convert to int */				error = copyout((caddr_t)&status,
++				status = 0xffff & p->p_xstat;   /* convert to int */
++				/*
++				 * m490: the status the parent is about to see, taken from
++				 * the same reap as the 0x96f0 record, so a child that exits
++				 * 7 is provable from the ring rather than assumed.
++				 */
++				{
++					extern void sweet_trace_record(uint64_t, uint64_t,
++					    uint64_t, uint64_t);
++
++					sweet_trace_record(0x9740,
++					    (uint64_t)(uint32_t)proc_getpid(p),
++					    (uint64_t)(uint32_t)status, 0x41545358ULL);
++				}
++				error = copyout((caddr_t)&status,
+ 				    uap->status,
+ 				    sizeof(status));
+ 				if (error) {
