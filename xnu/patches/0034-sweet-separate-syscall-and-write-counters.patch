@@ -1,0 +1,97 @@
+--- a/bsd/dev/arm/systemcalls.c
++++ b/bsd/dev/arm/systemcalls.c
+@@ -425,6 +425,13 @@
+ 						    uthread->uu_arg[2]);
+ 					}
+ 				}
++			
++				extern void sweet_count_write(uint32_t, uint32_t,
++				    uint32_t);
++				/* m478: counted where code really is SYS_write */
++				sweet_count_write((uint32_t)pid,
++				    (uint32_t)uthread->uu_arg[0],
++				    (uint32_t)uthread->uu_arg[2]);
+ 			}
+ 			/*
+ 			 * m473: the same write, in slots that cannot rotate.
+@@ -446,7 +453,7 @@
+ 			 */
+ 			{
+ 				extern void sweet_early_write64(uint64_t, uint64_t);
+-				extern void sweet_count_write(uint32_t, uint32_t,
++				extern void sweet_count_syscall(uint32_t,
+ 				    uint32_t);
+ 				static unsigned int sweet_w_seen, sweet_w_failed;
+ 				static const char sweet_marker[12] = "XNU_EL0_OK\n";
+@@ -493,9 +500,9 @@
+ 					sweet_w_failed++;
+ 				}
+ 				sweet_early_write64(0x87c8, (uint64_t)sweet_w_failed);
+-				sweet_count_write((uint32_t)pid,
+-				    (uint32_t)uthread->uu_arg[0],
+-				    (uint32_t)uthread->uu_arg[2]);
++				sweet_count_syscall((uint32_t)pid,
++				    (uint32_t)code);
++				sweet_early_write64(0x8730, (uint64_t)(uint32_t)code);
+ 			}
+ 			/*
+ 			 * Whether the child is alive, asked of the process table.
+@@ -1096,8 +1103,34 @@
+ unsigned int sweet_exec_enters_total, sweet_exec_enters_pid1;
+ unsigned int sweet_exec_enters_pid2, sweet_exec_enters_other;
+ unsigned int sweet_exec_loads_total;
++unsigned int sweet_syscalls_total, sweet_syscalls_pid1;
++unsigned int sweet_syscalls_pid2, sweet_syscalls_other;
++unsigned int sweet_syscalls_last_code;
+ unsigned int sweet_writes_total, sweet_writes_pid1, sweet_writes_pid2;
+ unsigned int sweet_writes_other, sweet_writes_zero;
++
++/*
++ * m478: syscalls and writes are different things and must not share a name.
++ *
++ * hw/m477 proved the 0x8700 block sits after the "if (code == SYS_write)"
++ * guard closes, so it runs on every BSD syscall: its 11 was the syscall
++ * count and its "fd=0 len=0 result=2" was getpid returning pid 2.  A
++ * write-only counter placed there silently counted syscalls.  The families
++ * are split by what increments them and 0x8730 records the code.
++ */
++void
++sweet_count_syscall(uint32_t pid, uint32_t code)
++{
++	sweet_syscalls_total++;
++	sweet_syscalls_last_code = code;
++	if (pid == 1) {
++		sweet_syscalls_pid1++;
++	} else if (pid == 2) {
++		sweet_syscalls_pid2++;
++	} else {
++		sweet_syscalls_other++;
++	}
++}
+ 
+ void
+ sweet_count_write(uint32_t pid, uint32_t fd, uint32_t len)
+@@ -1185,13 +1218,16 @@
+ 	sweet_early_write64(0x9180, (uint64_t)sweet_exec_enters_other);
+ 	sweet_early_write64(0x9188, 0x44494c4156ULL);
+ 
+-	/* write classification, same treatment */
++		/* syscalls and true writes, kept apart */
+ 	sweet_early_write64(0x9190, 0x4f4c584eULL);
+ 	sweet_early_write64(0x9198, (uint64_t)sweet_exec_loads_total);
+-	sweet_early_write64(0x91a0, (uint64_t)sweet_writes_total);
+-	sweet_early_write64(0x91a8, (uint64_t)sweet_writes_pid1);
+-	sweet_early_write64(0x91b0, (uint64_t)sweet_writes_pid2);
+-	sweet_early_write64(0x91b8, (uint64_t)sweet_writes_other);
+-	sweet_early_write64(0x91c0, (uint64_t)sweet_writes_zero);
+-	sweet_early_write64(0x91c8, 0x44494c4156ULL);
++	sweet_early_write64(0x91a0, (uint64_t)sweet_syscalls_total);
++	sweet_early_write64(0x91a8, (uint64_t)sweet_syscalls_pid1);
++	sweet_early_write64(0x91b0, (uint64_t)sweet_syscalls_pid2);
++	sweet_early_write64(0x91b8, (uint64_t)sweet_syscalls_other);
++	sweet_early_write64(0x91c0, (uint64_t)sweet_writes_total);
++	sweet_early_write64(0x91c8, (uint64_t)sweet_writes_pid1);
++	sweet_early_write64(0x91d0, (uint64_t)sweet_writes_pid2);
++	sweet_early_write64(0x91d8, (uint64_t)sweet_writes_zero);
++	sweet_early_write64(0x91e0, 0x44494c4156ULL);
+ }
