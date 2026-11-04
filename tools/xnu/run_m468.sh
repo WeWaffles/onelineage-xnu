@@ -13,19 +13,34 @@ CAP=/tmp/m468_cap.log
 
 echo "[1/5] preflight (bounded)"
 python3 - "$CAPTURE_TIMEOUT" <<'PY'
-import importlib.util, subprocess, sys
+import importlib.util, re, subprocess, sys, time
 spec = importlib.util.spec_from_file_location("rj", "tools/xnu/run_sm8850_jump.py")
 rj = importlib.util.module_from_spec(spec); spec.loader.exec_module(rj)
 idx = subprocess.run(["timeout", "8", "adb", "devices"], capture_output=True, text=True)
 if not any(l.endswith("device") for l in idx.stdout.splitlines()):
     print("PREFLIGHT_FAIL no adb device on the USB bus"); sys.exit(10)
-rc, txt = rj.adb("cat /proc/modules | grep -ci olxnu", timeout=15)
-n = (txt or "").strip().splitlines()[-1:] or ["?"]
-if n[0].strip() not in ("0", ""):
-    rj.adb("rmmod olxnu_payload2_mod_v21", timeout=20)
+# su can lag boot_completed, and a quoting or su error must not read as
+# "module loaded" (m468's first restart failed preflight on exactly that):
+# wait for root first, then parse the count as a number.
+deadline = time.time() + 90
+while time.time() < deadline:
+    rc, _ = rj.adb("true", timeout=15)
+    if rc == 0:
+        break
+    time.sleep(2)
+
+def module_count():
     rc, txt = rj.adb("cat /proc/modules | grep -ci olxnu", timeout=15)
-    n = (txt or "").strip().splitlines()[-1:] or ["?"]
-    if n[0].strip() not in ("0", ""):
+    m = re.search(r"^\s*(\d+)\s*$", txt or "", re.M)
+    return int(m.group(1)) if m else None
+
+n = module_count()
+if n is None:
+    print("PREFLIGHT_FAIL module count unreadable"); sys.exit(12)
+if n:
+    rj.adb("rmmod olxnu_payload2_mod_v21", timeout=20)
+    n = module_count()
+    if n:
         print("PREFLIGHT_FAIL payload module stuck (needs a device reboot)"); sys.exit(11)
 rc, base = rj.adb("cat /proc/last_kmsg | wc -c", timeout=20)
 print("baseline_bytes:", (base or "").strip().splitlines()[-1:] or ["?"])
