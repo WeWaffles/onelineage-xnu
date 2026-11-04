@@ -815,7 +815,7 @@ diff -ruN a/bsd/kern/kern_exec.c build/xnu-src/source/bsd/kern/kern_exec.c
  	 * Prefault executable or dyld entry point.
 diff -ruN a/bsd/kern/kern_exit.c build/xnu-src/source/bsd/kern/kern_exit.c
 --- a/bsd/kern/kern_exit.c	2023-08-13 22:06:07
-+++ build/xnu-src/source/bsd/kern/kern_exit.c	2026-11-03 19:01:11
++++ build/xnu-src/source/bsd/kern/kern_exit.c	2026-11-03 19:08:29
 @@ -72,6 +72,7 @@
   * Version 2.0.
   */
@@ -994,7 +994,7 @@ diff -ruN a/bsd/kern/kern_exit.c build/xnu-src/source/bsd/kern/kern_exit.c
  	/* if any pending cpu limits action, clear it */
  	task_clear_cpuusage(proc_task(p), TRUE);
  
-@@ -2169,12 +2285,42 @@
+@@ -2169,13 +2285,52 @@
  	 * This may block!
  	 */
  	fdt_invalidate(p);
@@ -1026,7 +1026,7 @@ diff -ruN a/bsd/kern/kern_exit.c build/xnu-src/source/bsd/kern/kern_exit.c
 +	 */
 +	{
 +		static int sweet_db_records;
-+
+ 
 +		if (sweet_db_records < 6) {
 +			sweet_db_records++;
 +			sweet_early_evidence(0xdb, (uint64_t)proc_getpid(p),
@@ -1034,9 +1034,58 @@ diff -ruN a/bsd/kern/kern_exit.c build/xnu-src/source/bsd/kern/kern_exit.c
 +		}
 +	}
 +
- 
++	{
++		static int sweet_e3_records;
++		if (sweet_e3_records < 4) {
++			sweet_e3_records++;
++			sweet_early_evidence(0xe3, (uint64_t)proc_getpid(p),
++			    (uint64_t)thread_tid(current_thread()), 0, 0);
++		}
++	}
++
++
  	if (uth->uu_lowpri_window) {
  		/*
+ 		 * task is marked as a low priority I/O type
+@@ -2210,7 +2365,23 @@
+ 	pth_proc_hashdelete(p);
+ #endif /* PSYNCH */
+ 
++	{
++		static int sweet_e4_records;
++		if (sweet_e4_records < 4) {
++			sweet_e4_records++;
++			sweet_early_evidence(0xe4, (uint64_t)proc_getpid(p),
++			    (uint64_t)thread_tid(current_thread()), 0, 0);
++		}
++	}
+ 	pg = proc_pgrp(p, &sessp);
++	{
++		static int sweet_e5_records;
++		if (sweet_e5_records < 4) {
++			sweet_e5_records++;
++			sweet_early_evidence(0xe5, (uint64_t)proc_getpid(p),
++			    (uint64_t)thread_tid(current_thread()), 0, 0);
++		}
++	}
+ 	if (SESS_LEADER(p, sessp)) {
+ 		if (sessp->s_ttyvp != NULLVP) {
+ 			struct vnode *ttyvp;
+@@ -2614,6 +2785,14 @@
+ #if DEVELOPMENT || DEBUG
+ 	proc_exit_lpexit_check(pid, PELS_POS_END);
+ #endif
++	{
++		static int sweet_e6_records;
++		if (sweet_e6_records < 4) {
++			sweet_e6_records++;
++			sweet_early_evidence(0xe6, (uint64_t)proc_getpid(p),
++			    (uint64_t)thread_tid(current_thread()), 0, 0);
++		}
++	}
+ }
+ 
+ 
 diff -ruN a/bsd/kern/kern_proc.c build/xnu-src/source/bsd/kern/kern_proc.c
 --- a/bsd/kern/kern_proc.c	2023-08-13 22:06:07
 +++ build/xnu-src/source/bsd/kern/kern_proc.c	2026-11-03 18:35:03

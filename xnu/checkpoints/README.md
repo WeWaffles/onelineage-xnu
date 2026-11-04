@@ -48,6 +48,10 @@ The recorded tags, in the order they were added:
 | 0xdd | `bsd/kern/kern_proc.c` | about to sleep on the reference count |
 | 0xde | `bsd/kern/kern_proc.c` | reference wait returned |
 | 0xe1 | `osfmk/kern/ast.c` | `ast_taken_kernel` early return: 1 not urgent, 2 waitq not possible |
+| 0xe3 | `bsd/kern/kern_exit.c` | all three teardown stages have returned |
+| 0xe4 | `bsd/kern/kern_exit.c` | just before `proc_pgrp` (takes `proc_list_lock` and a pgrp lock) |
+| 0xe5 | `bsd/kern/kern_exit.c` | `proc_pgrp` returned |
+| 0xe6 | `bsd/kern/kern_exit.c` | end of the `proc_exit` body |
 
 **A note on 0xd9–0xdb.** These were listed here before they existed in the
 kernel: the insert used an anchor that no longer matched, the patch script
