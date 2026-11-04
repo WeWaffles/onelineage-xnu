@@ -53,10 +53,30 @@ def build_image(payload: bytes, ramdisk: bytes | None) -> tuple[bytes, int, int,
     ba_pa      = phys_base + ba_pa_off
     entry_pa   = phys_base + (entry_va - virt_base)
 
+    # Layout assertions: the streamed image must stop before the panel buffer
+    # (FB_PA = phys_base + 0x2400000, matching mk_sm8850_adt.py and the boot_args
+    # fb_va below), boot_args must not land inside it, and the entry point must
+    # sit inside the loaded span.  A kernel that grows past 0x2400000 would be
+    # silently truncated or painted over otherwise.
+    FB_OFF  = 0x2400000
+    fb_span = (FB_STRIDE * FB_H + 0x1fffff) & ~0x1fffff
+    if ba_pa_off + PAGE > FB_OFF:
+        raise SystemExit(
+            f"boot_args page ends at 0x{ba_pa_off + PAGE:x}, inside the framebuffer "
+            f"at 0x{FB_OFF:x}")
+    if entry_pa - phys_base >= ba_pa_off:
+        raise SystemExit(
+            f"entry 0x{entry_pa - phys_base:x} is not below the ADT at 0x{ba_pa_off:x}")
+    if phys_base + FB_OFF + fb_span > phys_base + mem_size:
+        raise SystemExit("framebuffer extends past physBase+memSize")
+
     # Image spans from PA offset 0 to end of boot_args page
     img_size   = ba_pa_off + PAGE
     if ramdisk:
         img_size = max(img_size, RAMDISK_PA_OFFSET + len(ramdisk))
+    if img_size > FB_OFF:
+        raise SystemExit(
+            f"image 0x{img_size:x} would overwrite the framebuffer at 0x{FB_OFF:x}")
     img = bytearray(img_size)
 
     # Place kernel segments
@@ -149,6 +169,8 @@ def main() -> int:
     print(f"  entry_pa     = 0x{entry_pa:x}")
     print(f"  boot_args_pa = 0x{ba_pa:x}")
     print(f"  payload_size = 0x{len(img):x}")
+    print(f"  framebuffer  = 0x{phys_base + 0x2400000:x} (gap after image: "
+          f"0x{phys_base + 0x2400000 - (phys_base + len(img)):x})")
     print(f"")
     print(f"Device load sequence (after reboot):")
     print(f"  # 1. Load payload module:")

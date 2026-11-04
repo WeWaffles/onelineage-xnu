@@ -172,8 +172,20 @@ def main() -> int:
              f"(aligned={aligned}, in_region={in_region}, cma={from_cma}); "
              f"continuing because --allow-any-base")
     elif base != EXPECTED_BASE:
-        note(f"NOTE: payload base {base:#x} is aligned and differs from the "
-             f"historical {EXPECTED_BASE:#x}; every address derives from it")
+        #
+        # A shifted window has never produced records: 8 of 8 runs whose CMA
+        # landed 0x4000 into a block produced nothing, and m327's distant window
+        # produced no OLXNSS01 tag at all.  m441/m443 jumped at 0xb7600000
+        # (2 MB above the proven base) and produced no AA13 either.  Refuse
+        # rather than spend a jump and then interpret a silent ring.
+        if not args.allow_any_base:
+            note(f"ERROR: payload base {base:#x} differs from the proven "
+                 f"{EXPECTED_BASE:#x}; refusing to jump a shifted window "
+                 f"(use --allow-any-base to override)")
+            (out / "driver.log").write_text("\n".join(log) + "\n")
+            return 1
+        note(f"WARNING: payload base {base:#x} differs from {EXPECTED_BASE:#x}; "
+             f"continuing because --allow-any-base")
 
     #
     # Publish the kernel that was just built.
@@ -260,9 +272,36 @@ def main() -> int:
     # The framebuffer sits right past the image, not at +48 MB: the panel's
     # geometry (1472x3120 at 5888) needs 18.4 MB, which does not fit after 48 MB
     # in a 64 MB window.  Must match mk_sm8850_adt.py and build_sm8850_image.py.
-    fb = pbase + 0x2000000
+    fb = pbase + 0x2400000   # must match mk_sm8850_adt.py / build_sm8850_image.py
     fb_size = 5888 * 3120
     size = len(blob)
+
+    # Same layout assertions as the image builder, checked on the actual
+    # artifact: boot_args below the panel buffer, entry inside the image, and
+    # the whole stream stopping before the framebuffer.
+    fb_off_ref = 0x2400000
+    fb_span_ref = (5888 * 3120 + 0x1fffff) & ~0x1fffff
+    if ba - pbase + 0x4000 > fb_off_ref:
+        note(f"ERROR: boot_args 0x{ba:x} sits inside the framebuffer "
+             f"0x{pbase + fb_off_ref:x}")
+        (out / "driver.log").write_text("\n".join(log) + "\n")
+        return 1
+    if size > fb_off_ref:
+        note(f"ERROR: image 0x{size:x} would overwrite the framebuffer at "
+             f"+0x{fb_off_ref:x}")
+        (out / "driver.log").write_text("\n".join(log) + "\n")
+        return 1
+    if entry - pbase >= size:
+        note(f"ERROR: entry 0x{entry:x} is outside the streamed image")
+        (out / "driver.log").write_text("\n".join(log) + "\n")
+        return 1
+    if pbase + fb_off_ref + fb_span_ref > pbase + _mem:
+        note("ERROR: framebuffer extends past physBase+memSize")
+        (out / "driver.log").write_text("\n".join(log) + "\n")
+        return 1
+    note(f"layout ok: kernel_span=0x{adt_off:x} adt_off=0x{adt_off:x} ba_off=0x{ba - pbase:x} "
+         f"entry_off=0x{entry - pbase:x} image=0x{size:x} fb_off=0x{fb_off_ref:x} "
+         f"gap=0x{fb_off_ref - size:x}")
 
     # Skip leading all-zero pages so dd only moves real data.
     first_data = 0
