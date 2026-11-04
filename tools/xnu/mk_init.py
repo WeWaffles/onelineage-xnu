@@ -383,7 +383,7 @@ _RAW_CODE = [
     # why no probe ever recorded a child-only call.  Test x1, and the child falls
     # through into its own loop while the parent branches away.
     #
-    ("cbz", 1, "loop"),                                     # x1 == 0 -> parent
+    ("cbz", 1, "parentp"),                                  # x1 == 0 -> parent
     #
     # The child's first real work: a write, then exit.
     #
@@ -444,7 +444,7 @@ _RAW_CODE = [
     # with.  The park that follows keeps the mirrors refreshing after every
     # other process is gone.
     #
-    ("movn", 0, 0), ("adr", 1, "status"),
+    "parentp", ("movn", 0, 0), ("adr", 1, "status"),
     ("movz", 2, 0), ("movz", 3, 0),
     ("movz", 16, SYS_wait4), ("svc",),
     "loop", ("movn", 16, 27), ("svc",), ("b", "loop"),      # 28 task_self (parent)
