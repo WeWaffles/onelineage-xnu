@@ -4023,8 +4023,8 @@ diff -ruN a/osfmk/arm64/proc_reg.h build/xnu-src/source/osfmk/arm64/proc_reg.h
  #endif /* __ARM_16K_PG__ */
 diff -ruN a/osfmk/arm64/sleh.c build/xnu-src/source/osfmk/arm64/sleh.c
 --- a/osfmk/arm64/sleh.c	2026-11-03 17:51:44
-+++ build/xnu-src/source/osfmk/arm64/sleh.c	2026-11-03 20:22:46
-@@ -26,6 +26,7 @@
++++ build/xnu-src/source/osfmk/arm64/sleh.c	2026-11-03 20:30:29
+@@ -26,9 +26,11 @@
   * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
   */
  
@@ -4032,7 +4032,11 @@ diff -ruN a/osfmk/arm64/sleh.c build/xnu-src/source/osfmk/arm64/sleh.c
  #include <arm/caches_internal.h>
  #include <arm/cpu_data.h>
  #include <arm/cpu_data_internal.h>
-@@ -631,6 +632,26 @@
++#include <arm/cpu_number.h>
+ #include <arm/misc_protos.h>
+ #include <arm/thread.h>
+ #include <arm/rtclock.h>
+@@ -631,6 +633,26 @@
  	bool is_user = PSR64_IS_USER(get_saved_state_cpsr(state));
  
  	/*
@@ -4059,7 +4063,7 @@ diff -ruN a/osfmk/arm64/sleh.c build/xnu-src/source/osfmk/arm64/sleh.c
  	 * Use KERNEL_DEBUG_CONSTANT_IST here to avoid producing tracepoints
  	 * that would disclose the behavior of PT_DENY_ATTACH processes.
  	 */
-@@ -1861,9 +1882,52 @@
+@@ -1861,9 +1883,64 @@
  	 * sweet: TrustZone owns GIC Group 0, so the timer and IPIs that other
  	 * ARM64 targets take as FIQs arrive here as Group 1 IRQs.
  	 */
@@ -4068,6 +4072,18 @@ diff -ruN a/osfmk/arm64/sleh.c build/xnu-src/source/osfmk/arm64/sleh.c
 +extern int sweet_exit_tid;
  	uint64_t iar = __builtin_arm_rsr64("ICC_IAR1_EL1");
  	uint32_t intid = (uint32_t)(iar & 0xFFFFFF);
++	{
++		extern void sweet_early_evidence(uint64_t, uint64_t, uint64_t,
++		    uint64_t, uint64_t);
++		thread_t sweet_fe_thread = current_thread();
++		static int sweet_fe_records;
++		if (sweet_exit_tid != 0 && sweet_fe_records < 6) {
++			sweet_fe_records++;
++			sweet_early_evidence(0xfe, (uint64_t)(uint32_t)cpu_number(),
++			    (uint64_t)(sweet_fe_thread != NULL ? sweet_fe_thread->thread_id : 0),
++			    (uint64_t)intid, 0);
++		}
++	}
 +	{
 +		extern void sweet_early_evidence(uint64_t, uint64_t, uint64_t,
 +		    uint64_t, uint64_t);
@@ -4112,7 +4128,7 @@ diff -ruN a/osfmk/arm64/sleh.c build/xnu-src/source/osfmk/arm64/sleh.c
  	if (intid >= 1020 && intid <= 1023) {
  		return; /* spurious */
  	}
-@@ -2123,6 +2187,10 @@
+@@ -2123,6 +2200,10 @@
  
  	sp = get_saved_state_sp(&context->ss);
  	kernel_stack_bottom = round_page(thread->machine.kstackptr) - KERNEL_STACK_SIZE;
