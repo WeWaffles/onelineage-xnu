@@ -47,9 +47,26 @@ def main() -> int:
     ap.add_argument("outdir", type=pathlib.Path)
     ap.add_argument("--timeout", type=int, default=900)
     ap.add_argument("--grab-timeout", type=int, default=180)
+    ap.add_argument("--after-reset", action="store_true",
+                    help="ignore the dump that already exists; capture only the next boot")
     args = ap.parse_args()
 
     args.outdir.mkdir(parents=True, exist_ok=True)
+    baseline = b""
+    if args.after_reset:
+        # The previous boot's channel is readable right up to the jump, and it
+        # carries XNUKRN1 too, so the tag alone cannot tell the runs apart.
+        # hw/m390 was decoded from exactly that: the dump was byte-identical to
+        # hw/m389 and had been grabbed before the jump had even reset the phone.
+        baseline = adb(["exec-out", "su", "0", "sh", "-c", "cat /proc/last_kmsg"],
+                       timeout=30)
+        print(f"baseline {len(baseline)} bytes", flush=True)
+        off_deadline = time.time() + min(args.timeout, 120)
+        while time.time() < off_deadline:
+            if b"\tdevice" not in adb(["devices"], timeout=10):
+                print("device left (jump taken)", flush=True)
+                break
+            time.sleep(1)
 
     if not wait_for_device(time.time() + args.timeout):
         print("device never came back", file=sys.stderr)
@@ -74,6 +91,8 @@ def main() -> int:
         data = adb(["exec-out", "su", "0", "sh", "-c", "cat /proc/last_kmsg"],
                    timeout=30)
         tagged = b"XNUKRN1" in data
+        if baseline and data == baseline:
+            tagged = False   # still the boot we jumped from
         if tagged or len(data) > len(best):
             best = data
             print(f"  attempt {attempt}: {len(best)} bytes"
