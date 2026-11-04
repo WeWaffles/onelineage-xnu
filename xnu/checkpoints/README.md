@@ -61,6 +61,10 @@ The recorded tags, in the order they were added:
 | 0xed | `osfmk/kern/thread.c` | before the `task->corpse_info` block |
 | 0xee | `osfmk/kern/thread.c` | before the `threadcnt == 0` task lock |
 | 0xef | `osfmk/kern/thread.c` | immediately before `splsched()` |
+| 0xf0 | `osfmk/kern/thread.c` | `ipc_task_reset` returned |
+| 0xf1 | `osfmk/kern/thread.c` | `ipc_task_enable` returned |
+| 0xf2 | `osfmk/kern/thread.c` | before `task_deliver_crash_notification` |
+| 0xf3 | `osfmk/kern/thread.c` | `task_deliver_crash_notification` returned |
 
 **A note on 0xd9–0xdb.** These were listed here before they existed in the
 kernel: the insert used an anchor that no longer matched, the patch script

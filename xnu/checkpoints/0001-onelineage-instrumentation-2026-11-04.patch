@@ -7664,8 +7664,8 @@ diff -ruN a/osfmk/kern/task.c build/xnu-src/source/osfmk/kern/task.c
  	boolean_t                       interrupt_save;
 diff -ruN a/osfmk/kern/thread.c build/xnu-src/source/osfmk/kern/thread.c
 --- a/osfmk/kern/thread.c	2023-08-13 22:06:07
-+++ build/xnu-src/source/osfmk/kern/thread.c	2026-11-03 19:29:42
-@@ -622,11 +622,31 @@
++++ build/xnu-src/source/osfmk/kern/thread.c	2026-11-03 19:38:14
+@@ -622,21 +622,91 @@
  		subcode = proc_encode_exit_exception_code(bsd_info);
  		proc_exit(bsd_info);
  		bsd_info = NULL;
@@ -7697,9 +7697,52 @@ diff -ruN a/osfmk/kern/thread.c build/xnu-src/source/osfmk/kern/thread.c
  		if (task->corpse_info) {
  			/* reset all except task name port */
  			ipc_task_reset(task);
-@@ -637,6 +657,16 @@
++	{
++		extern void sweet_early_evidence(uint64_t, uint64_t, uint64_t,
++		    uint64_t, uint64_t);
++		static int sweet_f0_records;
++		if (sweet_f0_records < 4) {
++			sweet_f0_records++;
++			sweet_early_evidence(0xf0, (uint64_t)current_thread()->thread_id,
++			    0, 0, 0);
++		}
++	}
+ 			/* enable all task ports (name port unchanged) */
+ 			ipc_task_enable(task);
++	{
++		extern void sweet_early_evidence(uint64_t, uint64_t, uint64_t,
++		    uint64_t, uint64_t);
++		static int sweet_f1_records;
++		if (sweet_f1_records < 4) {
++			sweet_f1_records++;
++			sweet_early_evidence(0xf1, (uint64_t)current_thread()->thread_id,
++			    0, 0, 0);
++		}
++	}
+ 			exception_type_t etype = get_exception_from_corpse_crashinfo(task->corpse_info);
++	{
++		extern void sweet_early_evidence(uint64_t, uint64_t, uint64_t,
++		    uint64_t, uint64_t);
++		static int sweet_f2_records;
++		if (sweet_f2_records < 4) {
++			sweet_f2_records++;
++			sweet_early_evidence(0xf2, (uint64_t)current_thread()->thread_id,
++			    0, 0, 0);
++		}
++	}
+ 			task_deliver_crash_notification(task, current_thread(), etype, subcode);
++	{
++		extern void sweet_early_evidence(uint64_t, uint64_t, uint64_t,
++		    uint64_t, uint64_t);
++		static int sweet_f3_records;
++		if (sweet_f3_records < 4) {
++			sweet_f3_records++;
++			sweet_early_evidence(0xf3, (uint64_t)current_thread()->thread_id,
++			    0, 0, 0);
  		}
  	}
++		}
++	}
  
 +	{
 +		extern void sweet_early_evidence(uint64_t, uint64_t, uint64_t,
@@ -7714,7 +7757,7 @@ diff -ruN a/osfmk/kern/thread.c build/xnu-src/source/osfmk/kern/thread.c
  	if (threadcnt == 0) {
  		task_lock(task);
  		if (task_is_a_corpse_fork(task)) {
-@@ -645,6 +675,26 @@
+@@ -645,6 +715,26 @@
  		task_unlock(task);
  	}
  
@@ -7741,7 +7784,7 @@ diff -ruN a/osfmk/kern/thread.c build/xnu-src/source/osfmk/kern/thread.c
  	s = splsched();
  	thread_lock(thread);
  
-@@ -744,6 +794,16 @@
+@@ -744,6 +834,16 @@
  
  	thread_block((thread_continue_t)thread_terminate_continue);
  	/*NOTREACHED*/
