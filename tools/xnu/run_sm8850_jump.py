@@ -136,10 +136,11 @@ def main() -> int:
     #
     info = ""
     base = 0
-    for attempt in range(1, 5):
+    for attempt, size_mb in enumerate((128, 96, 64, 48), start=1):
+        base = 0
         rc, txt = adb(
             "insmod /data/local/tmp/olxnu/olxnu_payload2_mod_v21.ko "
-            f"proc_name=olxnu_payload2 payload_size_mb=128 "
+            f"proc_name=olxnu_payload2 payload_size_mb={size_mb} "
             f"target_pa=0xAE0000000 auto_base=1")
         note(f"payload insmod attempt {attempt} rc={rc} {txt}")
         time.sleep(1)
@@ -151,7 +152,7 @@ def main() -> int:
         ok = (m and "alloc_method=cma_alloc" in info
               and REGION_LO <= base < REGION_HI
               and not (base & ((2 << 20) - 1)))
-        note(f"attempt {attempt}: base=0x{base:x} cma={'alloc_method=cma_alloc' in info} usable={bool(ok)}")
+        note(f"attempt {attempt} size={size_mb}MB: base=0x{base:x} cma={'alloc_method=cma_alloc' in info} usable={bool(ok)}")
         if ok:
             break
         _, dmesg = adb("dmesg | tail -6")
