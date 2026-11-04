@@ -58,6 +58,8 @@ def main() -> int:
                     default=pathlib.Path("/Users/waffles/onelineage-xnu"))
     ap.add_argument("--allow-any-base", action="store_true",
                     help="jump even if the payload base is not 2 MB aligned")
+    ap.add_argument("--load-only", action="store_true",
+                    help="load the module (writes XNUJMP1) and stop before go")
     args = ap.parse_args()
 
     out = args.outdir
@@ -317,6 +319,11 @@ def main() -> int:
     # The real fix for the affinity panic is to give the topology every core
     # (cpus=8 with a single state=running node, or patching the ADT at jump time
     # with the MPIDR the stub actually sees), not to constrain the core.
+    if args.load_only:
+        note("--load-only: module loaded, marker written, NOT jumping")
+        (out / "driver.log").write_text("\n".join(log) + "\n")
+        return 0
+
     note("jumping")
     rc, txt = adb("echo go > /proc/olxnu_jump2/jump")
     note(f"go rc={rc} {txt}")
