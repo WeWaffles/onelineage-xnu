@@ -58,7 +58,7 @@ The recorded tags, in the order they were added:
 | 0xea | `osfmk/kern/thread.c` | `thread_terminate_self` resumed after `proc_exit` returned |
 | 0xeb | `osfmk/kern/thread.c` | before `splsched()` after the corpse/task bookkeeping |
 | 0xec | `osfmk/kern/thread.c` | just before `thread_exception_return()` in `thread_terminate_self` |
-| 0xed | `osfmk/kern/thread.c` | before the `task->corpse_info` block |
+| 0xed | `osfmk/kern/thread.c` | before the `task->corpse_info` block; carries the pointer value |
 | 0xee | `osfmk/kern/thread.c` | before the `threadcnt == 0` task lock |
 | 0xef | `osfmk/kern/thread.c` | immediately before `splsched()` |
 | 0xf0 | `osfmk/kern/thread.c` | `ipc_task_reset` returned |
