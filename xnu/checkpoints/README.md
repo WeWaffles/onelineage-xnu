@@ -65,6 +65,10 @@ The recorded tags, in the order they were added:
 | 0xf1 | `osfmk/kern/thread.c` | `ipc_task_enable` returned |
 | 0xf2 | `osfmk/kern/thread.c` | before `task_deliver_crash_notification` |
 | 0xf3 | `osfmk/kern/thread.c` | `task_deliver_crash_notification` returned |
+| 0xf4 | `osfmk/kern/ipc_tt.c` | `ipc_task_reset` entered |
+| 0xf5 | `osfmk/kern/ipc_tt.c` | before `itk_lock(task)` |
+| 0xf6 | `osfmk/kern/ipc_tt.c` | after `itk_lock(task)` |
+| 0xf7 | `osfmk/kern/ipc_tt.c` | end of `ipc_task_reset` |
 
 **A note on 0xd9–0xdb.** These were listed here before they existed in the
 kernel: the insert used an anchor that no longer matched, the patch script
