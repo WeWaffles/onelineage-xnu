@@ -815,7 +815,7 @@ diff -ruN a/bsd/kern/kern_exec.c build/xnu-src/source/bsd/kern/kern_exec.c
  	 * Prefault executable or dyld entry point.
 diff -ruN a/bsd/kern/kern_exit.c build/xnu-src/source/bsd/kern/kern_exit.c
 --- a/bsd/kern/kern_exit.c	2023-08-13 22:06:07
-+++ build/xnu-src/source/bsd/kern/kern_exit.c	2026-11-03 18:44:16
++++ build/xnu-src/source/bsd/kern/kern_exit.c	2026-11-03 19:01:11
 @@ -72,6 +72,7 @@
   * Version 2.0.
   */
@@ -844,26 +844,31 @@ diff -ruN a/bsd/kern/kern_exit.c build/xnu-src/source/bsd/kern/kern_exit.c
  	struct task *task = proc_task(p);
  	struct uthread *ut;
  	int error = 0;
-@@ -2085,6 +2099,18 @@
+@@ -2085,6 +2099,23 @@
  void
  proc_exit(proc_t p)
  {
++	extern int sweet_exit_tid;
++
++	sweet_exit_tid = (int)thread_tid(current_thread());
++
 +	/*
-+	 *   0xd2  a = pid
++	 *   0xd2  a = pid, b = exiting thread id
 +	 */
 +	{
 +		static int sweet_pe_records;
 +
 +		if (sweet_pe_records < 4) {
 +			sweet_pe_records++;
-+			sweet_early_evidence(0xd2, (uint64_t)proc_getpid(p), 0, 0, 0);
++			sweet_early_evidence(0xd2, (uint64_t)proc_getpid(p),
++			    (uint64_t)thread_tid(current_thread()), 0, 0);
 +		}
 +	}
 +
  	proc_t q;
  	proc_t pp;
  	struct task *task = proc_task(p);
-@@ -2100,6 +2126,20 @@
+@@ -2100,6 +2131,20 @@
  
  	proc_lock(p);
  	proc_transstart(p, 1, 0);
@@ -884,7 +889,7 @@ diff -ruN a/bsd/kern/kern_exit.c build/xnu-src/source/bsd/kern/kern_exit.c
  	if (!(p->p_lflag & P_LEXIT)) {
  		/*
  		 * This can happen if a thread_terminate() occurs
-@@ -2110,11 +2150,39 @@
+@@ -2110,11 +2155,39 @@
  		proc_unlock(p);
  		proc_prepareexit(p, 0, TRUE);
  		(void) task_terminate_internal(task);
@@ -924,7 +929,7 @@ diff -ruN a/bsd/kern/kern_exit.c build/xnu-src/source/bsd/kern/kern_exit.c
  		msleep(&p->exit_thread, &p->p_mlock, PWAIT, "proc_prepareexit_wait", NULL);
  	} else {
  		proc_transend(p, 1);
-@@ -2128,6 +2196,20 @@
+@@ -2128,6 +2201,20 @@
  	 * disappear on them.
  	 */
  	if ((p->p_lflag & P_LINSIGNAL) || (p->p_sigwaitcnt > 0)) {
@@ -945,7 +950,7 @@ diff -ruN a/bsd/kern/kern_exit.c build/xnu-src/source/bsd/kern/kern_exit.c
  		p->p_sigwaitcnt++;
  		while ((p->p_lflag & P_LINSIGNAL) || (p->p_sigwaitcnt > 1)) {
  			msleep(&p->p_sigmask, &p->p_mlock, PWAIT, "proc_sigdrain", NULL);
-@@ -2137,6 +2219,20 @@
+@@ -2137,6 +2224,20 @@
  
  	proc_unlock(p);
  	pid = proc_getpid(p);
@@ -966,7 +971,7 @@ diff -ruN a/bsd/kern/kern_exit.c build/xnu-src/source/bsd/kern/kern_exit.c
  	exitval = p->p_xstat;
  	KERNEL_DEBUG_CONSTANT_IST(KDEBUG_COMMON,
  	    BSDDBG_CODE(DBG_BSD_PROC, BSD_PROC_EXIT) | DBG_FUNC_START,
-@@ -2156,7 +2252,22 @@
+@@ -2156,7 +2257,22 @@
  	 */
  
  	proc_refdrain(p);
@@ -989,7 +994,7 @@ diff -ruN a/bsd/kern/kern_exit.c build/xnu-src/source/bsd/kern/kern_exit.c
  	/* if any pending cpu limits action, clear it */
  	task_clear_cpuusage(proc_task(p), TRUE);
  
-@@ -2169,12 +2280,42 @@
+@@ -2169,12 +2285,42 @@
  	 * This may block!
  	 */
  	fdt_invalidate(p);
@@ -4945,14 +4950,15 @@ diff -ruN a/osfmk/arm64/status.c build/xnu-src/source/osfmk/arm64/status.c
      int      pid)
 diff -ruN a/osfmk/arm64/sweet_early.c build/xnu-src/source/osfmk/arm64/sweet_early.c
 --- a/osfmk/arm64/sweet_early.c	2026-11-03 17:51:44
-+++ build/xnu-src/source/osfmk/arm64/sweet_early.c	2026-11-03 18:23:38
-@@ -11,8 +11,12 @@
++++ build/xnu-src/source/osfmk/arm64/sweet_early.c	2026-11-03 19:01:11
+@@ -11,8 +11,13 @@
  #include <stdint.h>
  #include <kern/misc_protos.h>
  
 +/* Set once fork has returned; gates scheduler records so boot-time noise
 + * cannot consume their caps before the interesting event (hw/m380). */
 +int sweet_fork_seen;
++int sweet_exit_tid;
 +
  extern void ml_phys_write_double_64(unsigned long long paddr, unsigned long long data);
 -extern void flush_dcache64(unsigned long long addr, unsigned count, int phys);
@@ -4960,7 +4966,7 @@ diff -ruN a/osfmk/arm64/sweet_early.c build/xnu-src/source/osfmk/arm64/sweet_ear
  
  static volatile uint32_t *early_fb = (volatile uint32_t *)(uintptr_t)0x9c000000;
  #define EARLY_FB early_fb
-@@ -24,8 +28,31 @@
+@@ -24,8 +29,31 @@
   * page tables are installed: the first sweet_early_mark() then faults and the
   * boot stops with no output anywhere.  sweet_early_set_fb() arms drawing only
   * when the boot args agree with the address that was mapped.
@@ -4992,7 +4998,7 @@ diff -ruN a/osfmk/arm64/sweet_early.c build/xnu-src/source/osfmk/arm64/sweet_ear
  
  /*
   * Stage stamps in the Samsung log region, which the bootloader preserves into
-@@ -37,7 +64,7 @@
+@@ -37,7 +65,7 @@
   * are visible.  Once that map goes away only the physmap works, which is why
   * arm_init arms the second path after arm_vm_init returns.
   */
@@ -5001,7 +5007,7 @@ diff -ruN a/osfmk/arm64/sweet_early.c build/xnu-src/source/osfmk/arm64/sweet_ear
  #define EARLY_STAGE_TAG 0x00000000314E5358ULL	/* "XNS1" */
  
  static unsigned int early_stage_identity_ok = 1;
-@@ -121,39 +148,275 @@
+@@ -121,39 +149,275 @@
  	early_fb_usable = (base != 0) && (base == (uint64_t)(uintptr_t)early_fb);
  }
  
@@ -5281,7 +5287,7 @@ diff -ruN a/osfmk/arm64/sweet_early.c build/xnu-src/source/osfmk/arm64/sweet_ear
  		return;
  	}
  
-@@ -174,7 +437,188 @@
+@@ -174,7 +438,188 @@
  	sweet_early_putc('\n');
  }
  
@@ -5470,7 +5476,7 @@ diff -ruN a/osfmk/arm64/sweet_early.c build/xnu-src/source/osfmk/arm64/sweet_ear
  sweet_early_panic(const char *fmt, va_list *args)
  {
  	if (early_disabled || early_panicking || !early_fb_usable) {
-@@ -204,6 +648,642 @@
+@@ -204,6 +649,642 @@
  	early_fb = (volatile uint32_t *)(uintptr_t)base;
  	__asm__ volatile("dsb sy" ::: "memory");
  	sweet_early_mark(9, "kernel framebuffer VA live");
@@ -7050,17 +7056,18 @@ diff -ruN a/osfmk/console/video_console.c build/xnu-src/source/osfmk/console/vid
  		// Adjust the video buffer pointer to point to where it is in high virtual (above the hole)
 diff -ruN a/osfmk/kern/ast.c build/xnu-src/source/osfmk/kern/ast.c
 --- a/osfmk/kern/ast.c	2023-08-13 22:06:07
-+++ build/xnu-src/source/osfmk/kern/ast.c	2026-11-03 18:44:16
-@@ -54,6 +54,8 @@
++++ build/xnu-src/source/osfmk/kern/ast.c	2026-11-03 19:01:11
+@@ -54,6 +54,9 @@
   * the rights to redistribute these changes.
   */
  
 +#include <arm64/sweet_early.h>
 +extern int sweet_fork_seen;
++extern int sweet_exit_tid;
  #include <kern/ast.h>
  #include <kern/counter.h>
  #include <kern/cpu_quiesce.h>
-@@ -110,6 +112,24 @@
+@@ -110,6 +113,26 @@
  void
  ast_taken_kernel(void)
  {
@@ -7075,7 +7082,9 @@ diff -ruN a/osfmk/kern/ast.c build/xnu-src/source/osfmk/kern/ast.c
 +	{
 +		static int sweet_ast_kernel_records;
 +
-+		if (sweet_fork_seen && sweet_ast_kernel_records < 8) {
++		if (sweet_fork_seen && sweet_exit_tid != 0 &&
++		    current_thread()->thread_id == (uint64_t)sweet_exit_tid &&
++		    sweet_ast_kernel_records < 12) {
 +			sweet_ast_kernel_records++;
 +			sweet_early_evidence(0xc7, (uint64_t)ast_peek(AST_ALL),
 +			    (uint64_t)sweet_ast_kernel_records, 0, 0);
@@ -7085,7 +7094,7 @@ diff -ruN a/osfmk/kern/ast.c build/xnu-src/source/osfmk/kern/ast.c
  	assert(ml_get_interrupts_enabled() == FALSE);
  
  	thread_t thread = current_thread();
-@@ -125,6 +145,7 @@
+@@ -125,6 +148,7 @@
  	 * has already been handled, due to races in enable_preemption
  	 */
  	if (ast_peek(AST_URGENT) != AST_URGENT) {
@@ -7093,7 +7102,7 @@ diff -ruN a/osfmk/kern/ast.c build/xnu-src/source/osfmk/kern/ast.c
  		return;
  	}
  
-@@ -133,6 +154,7 @@
+@@ -133,6 +157,7 @@
  	 * TODO: the thread can cheese this with clear_wait()
  	 */
  	if (waitq_wait_possible(thread) == FALSE) {
@@ -7101,7 +7110,7 @@ diff -ruN a/osfmk/kern/ast.c build/xnu-src/source/osfmk/kern/ast.c
  		/* Consume AST_URGENT or the interrupt will call us again */
  		ast_consume(AST_URGENT);
  		return;
-@@ -156,6 +178,27 @@
+@@ -156,6 +181,29 @@
  void
  ast_taken_user(void)
  {
@@ -7119,7 +7128,9 @@ diff -ruN a/osfmk/kern/ast.c build/xnu-src/source/osfmk/kern/ast.c
 +	{
 +		static int sweet_ast_records;
 +
-+		if (sweet_fork_seen && sweet_ast_records < 8) {
++		if (sweet_fork_seen && sweet_exit_tid != 0 &&
++		    current_thread()->thread_id == (uint64_t)sweet_exit_tid &&
++		    sweet_ast_records < 12) {
 +			sweet_ast_records++;
 +			sweet_early_evidence(0xc5, (uint64_t)ast_peek(AST_ALL),
 +			    (uint64_t)sweet_ast_records, 0, 0);
@@ -7148,17 +7159,18 @@ diff -ruN a/osfmk/kern/debug.c build/xnu-src/source/osfmk/kern/debug.c
  #if defined(__x86_64__) && (DEVELOPMENT || DEBUG)
 diff -ruN a/osfmk/kern/priority.c build/xnu-src/source/osfmk/kern/priority.c
 --- a/osfmk/kern/priority.c	2023-08-13 22:06:07
-+++ build/xnu-src/source/osfmk/kern/priority.c	2026-11-03 18:39:44
-@@ -63,6 +63,8 @@
++++ build/xnu-src/source/osfmk/kern/priority.c	2026-11-03 19:01:11
+@@ -63,6 +63,9 @@
   *	Priority related scheduler bits.
   */
  
 +#include <arm64/sweet_early.h>
 +extern int sweet_fork_seen;
++extern int sweet_exit_tid;
  #include <mach/boolean.h>
  #include <mach/kern_return.h>
  #include <mach/machine.h>
-@@ -105,12 +107,41 @@
+@@ -105,12 +108,45 @@
  	ast_t                           preempt;
  	uint64_t                        ctime;
  
@@ -7169,7 +7181,9 @@ diff -ruN a/osfmk/kern/priority.c build/xnu-src/source/osfmk/kern/priority.c
 +	{
 +		static int sweet_qe_records;
 +
-+		if (sweet_fork_seen && sweet_qe_records < 8) {
++		if (sweet_fork_seen && sweet_exit_tid != 0 &&
++		    thread->thread_id == (uint64_t)sweet_exit_tid &&
++		    sweet_qe_records < 12) {
 +			sweet_qe_records++;
 +			sweet_early_evidence(0xcd, (uint64_t)processor->cpu_id,
 +			    (uint64_t)thread->quantum_remaining,
@@ -7190,7 +7204,9 @@ diff -ruN a/osfmk/kern/priority.c build/xnu-src/source/osfmk/kern/priority.c
 +	{
 +		static int sweet_qa_records;
 +
-+		if (sweet_fork_seen && sweet_qa_records < 8) {
++		if (sweet_fork_seen && sweet_exit_tid != 0 &&
++		    thread->thread_id == (uint64_t)sweet_exit_tid &&
++		    sweet_qa_records < 12) {
 +			sweet_qa_records++;
 +			sweet_early_evidence(0xca, (uint64_t)thread->quantum_remaining,
 +			    processor->quantum_end, (uint64_t)processor->current_pri, 0);
@@ -7200,7 +7216,7 @@ diff -ruN a/osfmk/kern/priority.c build/xnu-src/source/osfmk/kern/priority.c
  	SCHED_STATS_INC(quantum_timer_expirations);
  
  	/*
-@@ -231,6 +262,21 @@
+@@ -231,6 +267,23 @@
  
  	if ((preempt = csw_check(thread, processor, check_reason)) != AST_NONE) {
  		ast_on(preempt);
@@ -7213,7 +7229,9 @@ diff -ruN a/osfmk/kern/priority.c build/xnu-src/source/osfmk/kern/priority.c
 +	{
 +		static int sweet_qc_records;
 +
-+		if (sweet_fork_seen && sweet_qc_records < 8) {
++		if (sweet_fork_seen && sweet_exit_tid != 0 &&
++		    thread->thread_id == (uint64_t)sweet_exit_tid &&
++		    sweet_qc_records < 12) {
 +			sweet_qc_records++;
 +			sweet_early_evidence(0xcb, (uint64_t)preempt,
 +			    (uint64_t)processor->current_pri,

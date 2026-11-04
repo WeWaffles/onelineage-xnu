@@ -73,14 +73,15 @@ def main() -> int:
         attempt += 1
         data = adb(["exec-out", "su", "0", "sh", "-c", "cat /proc/last_kmsg"],
                    timeout=30)
-        if len(data) > len(best):
+        tagged = b"XNUKRN1" in data
+        if tagged or len(data) > len(best):
             best = data
             print(f"  attempt {attempt}: {len(best)} bytes"
                   + (" (XNUKRN1)" if b"XNUKRN1" in best else ""), flush=True)
             # Save as soon as there is something: a run killed by an outer
             # timeout must not lose the only copy of this boot's channel.
             (args.outdir / "last_kmsg.txt").write_bytes(best)
-        if b"XNUKRN1" in best:
+        if tagged:
             break
         time.sleep(2)
 
