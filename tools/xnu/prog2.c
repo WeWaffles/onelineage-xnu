@@ -44,12 +44,19 @@ sweet_syscall(long number, long a0, long a1, long a2)
 static const char ok_msg[] = "PGM2_OK\n";
 static const char bad_msg[] = "PGM2_BAD\n";
 static const char launchd[] = "/launchd";
-static unsigned char buf[16];
 
 void
 _start(void)
 {
 	long fd, n, status = 9;
+	/*
+	 * The buffer must not live in __DATA: this image's __DATA segment has
+	 * filesize 0, so it is pure zero-fill, and hw/m490 shows the child dying
+	 * on its first access to that page (__bss at 0x100004000) right after a
+	 * successful read.  A stack array keeps the bytes in memory the exec
+	 * already backed.
+	 */
+	unsigned char buf[16];
 
 	fd = sweet_syscall(SYS_open, (long)launchd, 0, 0);
 	if (fd >= 0) {
