@@ -7664,8 +7664,8 @@ diff -ruN a/osfmk/kern/task.c build/xnu-src/source/osfmk/kern/task.c
  	boolean_t                       interrupt_save;
 diff -ruN a/osfmk/kern/thread.c build/xnu-src/source/osfmk/kern/thread.c
 --- a/osfmk/kern/thread.c	2023-08-13 22:06:07
-+++ build/xnu-src/source/osfmk/kern/thread.c	2026-11-03 19:23:36
-@@ -622,6 +622,16 @@
++++ build/xnu-src/source/osfmk/kern/thread.c	2026-11-03 19:29:42
+@@ -622,11 +622,31 @@
  		subcode = proc_encode_exit_exception_code(bsd_info);
  		proc_exit(bsd_info);
  		bsd_info = NULL;
@@ -7682,10 +7682,52 @@ diff -ruN a/osfmk/kern/thread.c build/xnu-src/source/osfmk/kern/thread.c
  		/*
  		 * if there is crash info in task
  		 * then do the deliver action since this is
-@@ -645,6 +655,16 @@
+ 		 * last thread for this task.
+ 		 */
++	{
++		extern void sweet_early_evidence(uint64_t, uint64_t, uint64_t,
++		    uint64_t, uint64_t);
++		static int sweet_ed_records;
++		if (sweet_ed_records < 4) {
++			sweet_ed_records++;
++			sweet_early_evidence(0xed, (uint64_t)current_thread()->thread_id,
++			    0, 0, 0);
++		}
++	}
+ 		if (task->corpse_info) {
+ 			/* reset all except task name port */
+ 			ipc_task_reset(task);
+@@ -637,6 +657,16 @@
+ 		}
+ 	}
+ 
++	{
++		extern void sweet_early_evidence(uint64_t, uint64_t, uint64_t,
++		    uint64_t, uint64_t);
++		static int sweet_ee_records;
++		if (sweet_ee_records < 4) {
++			sweet_ee_records++;
++			sweet_early_evidence(0xee, (uint64_t)current_thread()->thread_id,
++			    0, 0, 0);
++		}
++	}
+ 	if (threadcnt == 0) {
+ 		task_lock(task);
+ 		if (task_is_a_corpse_fork(task)) {
+@@ -645,6 +675,26 @@
  		task_unlock(task);
  	}
  
++	{
++		extern void sweet_early_evidence(uint64_t, uint64_t, uint64_t,
++		    uint64_t, uint64_t);
++		static int sweet_ef_records;
++		if (sweet_ef_records < 4) {
++			sweet_ef_records++;
++			sweet_early_evidence(0xef, (uint64_t)current_thread()->thread_id,
++			    0, 0, 0);
++		}
++	}
 +	{
 +		extern void sweet_early_evidence(uint64_t, uint64_t, uint64_t,
 +		    uint64_t, uint64_t);
@@ -7699,7 +7741,7 @@ diff -ruN a/osfmk/kern/thread.c build/xnu-src/source/osfmk/kern/thread.c
  	s = splsched();
  	thread_lock(thread);
  
-@@ -744,6 +764,16 @@
+@@ -744,6 +794,16 @@
  
  	thread_block((thread_continue_t)thread_terminate_continue);
  	/*NOTREACHED*/
