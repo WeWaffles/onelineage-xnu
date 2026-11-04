@@ -199,6 +199,18 @@ def main() -> int:
             return 1
     note(f"published kernel {time.strftime('%H:%M:%S', time.localtime((built / 'kernel.development.sweet').stat().st_mtime))}")
 
+    # # Provenance guard: a stale kernel silently produced an 0x1ff4000 image that
+    # reached neither XNU's nonce nor bsd_init (m408-m413), and it looked exactly
+    # like a boot failure.  Rebuild when sources are newer, and refuse an image
+    # that cannot have come from this tree.
+    import hashlib
+    kern = repo / "build/xnu-build/sym/kernel.development.sweet"
+    newest_src = max(p.stat().st_mtime for p in (repo / "build/xnu-src/source/osfmk/arm64").rglob("*.s"))
+    if not kern.exists() or kern.stat().st_mtime < newest_src:
+        note("kernel older than arm64 sources - rebuilding before any jump")
+        rc_rb, txt_rb = sh(f"cd {repo} && python3 tools/xnu/target.py phone", timeout=900)
+        note(f"rebuild rc={rc_rb} {txt_rb[-200:]}")
+
     note("building image")
     for cmd in (
         f"python3 tools/xnu/mk_sm8850_adt.py build/sm8850_xnu_v22.adt "
@@ -222,6 +234,17 @@ def main() -> int:
     # (and boot_args placement) move whenever the kernel is rebuilt, so they
     # must never be hardcoded here.
     image = repo / "build/sm8850_image_v22.bin"
+    img_bytes = image.read_bytes()
+    if image.stat().st_mtime + 2 < kern.stat().st_mtime:
+        note("ERROR: image is older than the kernel - refusing a stale build")
+        (out / "driver.log").write_text("\n".join(log) + "\n")
+        return 1
+    if len(img_bytes) < 0x2000000:
+        note(f"ERROR: image 0x{len(img_bytes):x} is in the stale 0x1ff4000 class - refusing")
+        (out / "driver.log").write_text("\n".join(log) + "\n")
+        return 1
+    note(f"BUILD image sha256={hashlib.sha256(img_bytes).hexdigest()} size=0x{len(img_bytes):x} "
+         f"kernel_sha256={hashlib.sha256(kern.read_bytes()).hexdigest()}")
     blob = image.read_bytes()
     payload = (repo / "build/sweet_sm8850_v22.bin").read_bytes()
     virt_base, entry_va, _adt_off, adt_size, kernel_end, pbase, _mem = \
