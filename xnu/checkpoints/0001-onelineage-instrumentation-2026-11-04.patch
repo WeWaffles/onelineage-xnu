@@ -77,7 +77,7 @@ diff -ruN a/bsd/conf/files build/xnu-src/source/bsd/conf/files
  
 diff -ruN a/bsd/dev/arm/systemcalls.c build/xnu-src/source/bsd/dev/arm/systemcalls.c
 --- a/bsd/dev/arm/systemcalls.c	2023-08-13 22:06:07
-+++ build/xnu-src/source/bsd/dev/arm/systemcalls.c	2026-11-03 15:54:45
++++ build/xnu-src/source/bsd/dev/arm/systemcalls.c	2026-11-03 18:08:26
 @@ -16,6 +16,7 @@
  #include <arm64/proc_reg.h>
  #include <pexpert/pexpert.h>
@@ -86,7 +86,7 @@ diff -ruN a/bsd/dev/arm/systemcalls.c build/xnu-src/source/bsd/dev/arm/systemcal
  #include <sys/kernel.h>
  #include <sys/kern_debug.h>
  #include <sys/vm.h>
-@@ -32,6 +33,12 @@
+@@ -32,8 +33,16 @@
  
  #include <security/audit/audit.h>
  
@@ -98,8 +98,12 @@ diff -ruN a/bsd/dev/arm/systemcalls.c build/xnu-src/source/bsd/dev/arm/systemcal
 +
  #if CONFIG_MACF
  #include <security/mac_framework.h>
++
++extern int sweet_fork_seen;
  #endif
-@@ -86,6 +93,29 @@
+ 
+ #if CONFIG_DTRACE
+@@ -86,6 +95,29 @@
   *
   * Outputs:	none
   */
@@ -129,7 +133,7 @@ diff -ruN a/bsd/dev/arm/systemcalls.c build/xnu-src/source/bsd/dev/arm/systemcal
  void
  unix_syscall(
  	struct arm_saved_state * state,
-@@ -180,6 +210,285 @@
+@@ -180,6 +212,286 @@
  	AUDIT_SYSCALL_ENTER(code, proc, uthread);
  	error = (*(callp->sy_call))(proc, &uthread->uu_arg[0], &(uthread->uu_rval[0]));
  	AUDIT_SYSCALL_EXIT(code, proc, uthread, error);
@@ -303,6 +307,7 @@ diff -ruN a/bsd/dev/arm/systemcalls.c build/xnu-src/source/bsd/dev/arm/systemcal
 +				sweet_early_evidence(0xba, SWEET_RVAL64(uthread),
 +				    (uint64_t)(uint32_t)pid, 0, 0);
 +				sweet_child_pid = (int)SWEET_RVAL64(uthread);
++				sweet_fork_seen = 1;
 +			}
 +			/*
 +			 * Whether the child is alive, asked of the process table.
@@ -808,6 +813,37 @@ diff -ruN a/bsd/kern/kern_exec.c build/xnu-src/source/bsd/kern/kern_exec.c
  
  	/*
  	 * Prefault executable or dyld entry point.
+diff -ruN a/bsd/kern/kern_exit.c build/xnu-src/source/bsd/kern/kern_exit.c
+--- a/bsd/kern/kern_exit.c	2023-08-13 22:06:07
++++ build/xnu-src/source/bsd/kern/kern_exit.c	2026-11-03 18:08:26
+@@ -72,6 +72,7 @@
+  * Version 2.0.
+  */
+ 
++#include <arm64/sweet_early.h>
+ #include <machine/reg.h>
+ #include <machine/psl.h>
+ #include <stdatomic.h>
+@@ -1469,6 +1470,19 @@
+     int jetsam_flags, struct os_reason *exit_reason)
+ {
+ 	thread_t self = current_thread();
++	/*
++	 *   0xce  a = pid exiting, b = rv, c = thread id
++	 */
++	{
++		static int sweet_exit_records;
++
++		if (sweet_exit_records < 4) {
++			sweet_exit_records++;
++			sweet_early_evidence(0xce, (uint64_t)proc_getpid(p),
++			    (uint64_t)(uint32_t)rv, 0, 0);
++		}
++	}
++
+ 	struct task *task = proc_task(p);
+ 	struct uthread *ut;
+ 	int error = 0;
 diff -ruN a/bsd/kern/mach_loader.c build/xnu-src/source/bsd/kern/mach_loader.c
 --- a/bsd/kern/mach_loader.c	2023-08-13 22:06:07
 +++ build/xnu-src/source/bsd/kern/mach_loader.c	2026-11-01 20:01:33
@@ -4657,17 +4693,22 @@ diff -ruN a/osfmk/arm64/status.c build/xnu-src/source/osfmk/arm64/status.c
      int      pid)
 diff -ruN a/osfmk/arm64/sweet_early.c build/xnu-src/source/osfmk/arm64/sweet_early.c
 --- a/osfmk/arm64/sweet_early.c	2026-11-03 17:51:44
-+++ build/xnu-src/source/osfmk/arm64/sweet_early.c	2026-11-03 12:30:03
-@@ -12,7 +12,7 @@
++++ build/xnu-src/source/osfmk/arm64/sweet_early.c	2026-11-03 18:07:25
+@@ -11,8 +11,12 @@
+ #include <stdint.h>
  #include <kern/misc_protos.h>
  
++/* Set once fork has returned; gates scheduler records so boot-time noise
++ * cannot consume their caps before the interesting event (hw/m380). */
++int sweet_fork_seen;
++
  extern void ml_phys_write_double_64(unsigned long long paddr, unsigned long long data);
 -extern void flush_dcache64(unsigned long long addr, unsigned count, int phys);
 +extern void ml_phys_write_word_64(unsigned long long paddr, unsigned int data);
  
  static volatile uint32_t *early_fb = (volatile uint32_t *)(uintptr_t)0x9c000000;
  #define EARLY_FB early_fb
-@@ -24,8 +24,31 @@
+@@ -24,8 +28,31 @@
   * page tables are installed: the first sweet_early_mark() then faults and the
   * boot stops with no output anywhere.  sweet_early_set_fb() arms drawing only
   * when the boot args agree with the address that was mapped.
@@ -4699,7 +4740,7 @@ diff -ruN a/osfmk/arm64/sweet_early.c build/xnu-src/source/osfmk/arm64/sweet_ear
  
  /*
   * Stage stamps in the Samsung log region, which the bootloader preserves into
-@@ -37,7 +60,7 @@
+@@ -37,7 +64,7 @@
   * are visible.  Once that map goes away only the physmap works, which is why
   * arm_init arms the second path after arm_vm_init returns.
   */
@@ -4708,7 +4749,7 @@ diff -ruN a/osfmk/arm64/sweet_early.c build/xnu-src/source/osfmk/arm64/sweet_ear
  #define EARLY_STAGE_TAG 0x00000000314E5358ULL	/* "XNS1" */
  
  static unsigned int early_stage_identity_ok = 1;
-@@ -121,39 +144,275 @@
+@@ -121,39 +148,275 @@
  	early_fb_usable = (base != 0) && (base == (uint64_t)(uintptr_t)early_fb);
  }
  
@@ -4988,7 +5029,7 @@ diff -ruN a/osfmk/arm64/sweet_early.c build/xnu-src/source/osfmk/arm64/sweet_ear
  		return;
  	}
  
-@@ -174,7 +433,188 @@
+@@ -174,7 +437,188 @@
  	sweet_early_putc('\n');
  }
  
@@ -5177,7 +5218,7 @@ diff -ruN a/osfmk/arm64/sweet_early.c build/xnu-src/source/osfmk/arm64/sweet_ear
  sweet_early_panic(const char *fmt, va_list *args)
  {
  	if (early_disabled || early_panicking || !early_fb_usable) {
-@@ -204,6 +644,615 @@
+@@ -204,6 +648,639 @@
  	early_fb = (volatile uint32_t *)(uintptr_t)base;
  	__asm__ volatile("dsb sy" ::: "memory");
  	sweet_early_mark(9, "kernel framebuffer VA live");
@@ -5653,9 +5694,33 @@ diff -ruN a/osfmk/arm64/sweet_early.c build/xnu-src/source/osfmk/arm64/sweet_ear
 +}
 +
 +void
++
 +sweet_early_evidence(uint64_t stage, uint64_t a, uint64_t b, uint64_t c,
 +    uint64_t d)
 +{
++	/*
++	 * hw/m379: the ring holds 16 records and the console emits 0xc6 for its
++	 * own traffic at character rate, so a run that prints anything erases the
++	 * events it is trying to observe.  bsd/dev/arm/systemcalls.c:446 already
++	 * notes this ("rotated out of the 16-record ring - by the console's
++	 * thousands of 0xc6").  Keep a few of the noisy tags, let the rest through.
++	 */
++	if (stage == 0xc6) {
++		static int sweet_c6;
++		if (sweet_c6 >= 2) {
++			return;
++		}
++		sweet_c6++;
++	}
++
++	if (stage == 0xb6) {
++		static int sweet_b6;
++		if (sweet_b6 >= 6) {
++			return;
++		}
++		sweet_b6++;
++	}
++
 +	const uint64_t magic = 0x313053534e584c4fULL; /* "OLXNS01" */
 +	uint64_t seq = ++sweet_evidence_seq;
 +
@@ -6809,6 +6874,139 @@ diff -ruN a/osfmk/kern/debug.c build/xnu-src/source/osfmk/kern/debug.c
  #endif
  
  #if defined(__x86_64__) && (DEVELOPMENT || DEBUG)
+diff -ruN a/osfmk/kern/priority.c build/xnu-src/source/osfmk/kern/priority.c
+--- a/osfmk/kern/priority.c	2023-08-13 22:06:07
++++ build/xnu-src/source/osfmk/kern/priority.c	2026-11-03 18:00:55
+@@ -63,6 +63,7 @@
+  *	Priority related scheduler bits.
+  */
+ 
++#include <arm64/sweet_early.h>
+ #include <mach/boolean.h>
+ #include <mach/kern_return.h>
+ #include <mach/machine.h>
+@@ -105,12 +106,41 @@
+ 	ast_t                           preempt;
+ 	uint64_t                        ctime;
+ 
++	/*
++	 *   0xcd  a = cpu_id, b = quantum_remaining, c = callback thread id,
++	 *         d = current thread id (equal means the asserts below can pass)
++	 */
++	{
++		static int sweet_qe_records;
++
++		if (sweet_qe_records < 4) {
++			sweet_qe_records++;
++			sweet_early_evidence(0xcd, (uint64_t)processor->cpu_id,
++			    (uint64_t)thread->quantum_remaining,
++			    (uint64_t)thread->thread_id,
++			    (uint64_t)current_thread()->thread_id);
++		}
++	}
++
+ 	assert(processor == current_processor());
+ 	assert(thread == current_thread());
+ 
+ 	KDBG_RELEASE(MACHDBG_CODE(
+ 		    DBG_MACH_SCHED, MACH_SCHED_QUANTUM_EXPIRED) | DBG_FUNC_START);
+ 
++	/*
++	 *   0xca  a = quantum remaining, b = processor quantum_end, c = current_pri
++	 */
++	{
++		static int sweet_qa_records;
++
++		if (sweet_qa_records < 4) {
++			sweet_qa_records++;
++			sweet_early_evidence(0xca, (uint64_t)thread->quantum_remaining,
++			    processor->quantum_end, (uint64_t)processor->current_pri, 0);
++		}
++	}
++
+ 	SCHED_STATS_INC(quantum_timer_expirations);
+ 
+ 	/*
+@@ -231,6 +261,21 @@
+ 
+ 	if ((preempt = csw_check(thread, processor, check_reason)) != AST_NONE) {
+ 		ast_on(preempt);
++	}
++
++	/*
++	 *   0xcb  a = preempt bits returned by csw_check, b = current_pri,
++	 *         c = this thread's sched_pri, d = check_reason
++	 */
++	{
++		static int sweet_qc_records;
++
++		if (sweet_qc_records < 4) {
++			sweet_qc_records++;
++			sweet_early_evidence(0xcb, (uint64_t)preempt,
++			    (uint64_t)processor->current_pri,
++			    (uint64_t)thread->sched_pri, (uint64_t)check_reason);
++		}
+ 	}
+ 
+ 	/*
+diff -ruN a/osfmk/kern/sched_prim.c build/xnu-src/source/osfmk/kern/sched_prim.c
+--- a/osfmk/kern/sched_prim.c	2023-08-13 22:06:07
++++ build/xnu-src/source/osfmk/kern/sched_prim.c	2026-11-03 18:06:44
+@@ -64,6 +64,8 @@
+  *
+  */
+ 
++#include <arm64/sweet_early.h>
++extern int sweet_fork_seen;
+ #include <debug.h>
+ 
+ #include <mach/mach_types.h>
+@@ -3754,6 +3756,19 @@
+ 			kperf_running_setup(processor, processor->last_dispatch);
+ 		}
+ 		running_timers_activate(processor);
++
++		/*
++		 *   0xcc  a = quantum_remaining, b = quantum_end, c = last_dispatch
++		 */
++		{
++			static int sweet_qd_records;
++
++			if (sweet_qd_records < 4) {
++				sweet_qd_records++;
++				sweet_early_evidence(0xcc, (uint64_t)self->quantum_remaining,
++				    processor->quantum_end, processor->last_dispatch, 0);
++			}
++		}
+ 		processor->first_timeslice = TRUE;
+ 	} else {
+ 		running_timers_deactivate(processor);
+@@ -3800,6 +3815,25 @@
+ 	ast_t                           reason)
+ {
+ 	thread_t        self = current_thread();
++	/*
++	 * hw/m380: after the fork child writes, neither AST path fires and the
++	 * parent produces no further traps.  A parent blocked on a waitq and a
++	 * parent runnable-but-starved look the same from the ring, so record the
++	 * block itself.  Gated on the fork so boot-time blocks cannot eat the
++	 * cap before the interesting one.
++	 *
++	 *   0xcf  a = thread id blocking, b = reason, c = has a continuation
++	 */
++	if (sweet_fork_seen) {
++		static int sweet_blk_records;
++
++		if (sweet_blk_records < 6) {
++			sweet_blk_records++;
++			sweet_early_evidence(0xcf, (uint64_t)self->thread_id,
++			    (uint64_t)reason, (uint64_t)(continuation != NULL), 0);
++		}
++	}
++
+ 	processor_t     processor;
+ 	thread_t        new_thread;
+ 	spl_t           s;
 diff -ruN a/osfmk/kern/socd_client.c build/xnu-src/source/osfmk/kern/socd_client.c
 --- a/osfmk/kern/socd_client.c	2023-08-13 22:06:07
 +++ build/xnu-src/source/osfmk/kern/socd_client.c	2026-11-01 23:36:12
@@ -7080,6 +7278,42 @@ diff -ruN a/osfmk/kern/task.c build/xnu-src/source/osfmk/kern/task.c
  	thread_bootstrap_return();
  }
  
+diff -ruN a/osfmk/kern/timer_call.c build/xnu-src/source/osfmk/kern/timer_call.c
+--- a/osfmk/kern/timer_call.c	2023-08-13 22:06:07
++++ build/xnu-src/source/osfmk/kern/timer_call.c	2026-11-03 17:54:49
+@@ -29,6 +29,7 @@
+  * Timer interrupt callout module.
+  */
+ 
++#include <arm64/sweet_early.h>
+ #include <mach/mach_types.h>
+ 
+ #include <kern/clock.h>
+@@ -2098,6 +2099,24 @@
+ running_timers_expire(processor_t processor, uint64_t now)
+ {
+ 	bool expired = false;
++	/*
++	 * hw/m378: the tick reaches here through timer_intr.  If nothing is armed
++	 * the quantum can never expire and an EL0 thread is never preempted, which
++	 * is exactly what hw/m376 measured (interrupts, no ASTs).
++	 *
++	 *   0xc9  a = running_timers_active, b = quantum deadline, c = now
++	 */
++	{
++		static int sweet_rte_records;
++
++		if (sweet_rte_records < 4) {
++			sweet_rte_records++;
++			sweet_early_evidence(0xc9,
++			    (uint64_t)processor->running_timers_active,
++			    processor->running_timers[RUNNING_TIMER_QUANTUM].tc_pqlink.deadline,
++			    now, 0);
++		}
++	}
+ 
+ 	if (!processor->running_timers_active) {
+ 		return expired;
 diff -ruN a/osfmk/kern/zalloc.c build/xnu-src/source/osfmk/kern/zalloc.c
 --- a/osfmk/kern/zalloc.c	2023-08-13 22:06:07
 +++ build/xnu-src/source/osfmk/kern/zalloc.c	2026-11-01 16:07:17

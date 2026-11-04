@@ -25,6 +25,20 @@ The recorded tags, in the order they were added:
 | 0xc3 | `osfmk/arm64/sleh.c` | interrupt count, every 1024 |
 | 0xc5 | `osfmk/kern/ast.c` `ast_taken_user` | AST taken returning to user |
 | 0xc7 | `osfmk/kern/ast.c` `ast_taken_kernel` | AST taken in kernel |
+| 0xc9 | `osfmk/kern/timer_call.c` | running timers: active, quantum deadline, now |
+| 0xca | `osfmk/kern/priority.c` | quantum expired: remaining, quantum_end, priority |
+| 0xcb | `osfmk/kern/priority.c` | `csw_check` verdict at quantum expiry |
+| 0xcc | `osfmk/kern/sched_prim.c` | quantum armed at dispatch |
+| 0xcd | `osfmk/kern/priority.c` | quantum callback entered (thread ids) |
+| 0xce | `bsd/kern/kern_exit.c` | `exit(0)` reached BSD: pid, status |
+| 0xcf | `osfmk/kern/sched_prim.c` | thread blocking after fork: id, reason, continuation |
+
+Two measurement hazards are also fixed here. The ring holds 16 records and the
+console emits `0xc6` at character rate, so `sweet_early_evidence()` now keeps
+only the first two `0xc6` and six `0xb6`; without that, records from after the
+fork child runs are rotated out before the pull (`hw/m379`). Scheduler records
+are gated on `sweet_fork_seen` so cap-consuming boot activity cannot hide the
+post-fork event (`hw/m380`).
 
 ## Reproduce
 
