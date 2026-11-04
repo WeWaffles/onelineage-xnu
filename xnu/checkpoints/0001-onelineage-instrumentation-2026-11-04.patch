@@ -4023,7 +4023,7 @@ diff -ruN a/osfmk/arm64/proc_reg.h build/xnu-src/source/osfmk/arm64/proc_reg.h
  #endif /* __ARM_16K_PG__ */
 diff -ruN a/osfmk/arm64/sleh.c build/xnu-src/source/osfmk/arm64/sleh.c
 --- a/osfmk/arm64/sleh.c	2026-11-03 17:51:44
-+++ build/xnu-src/source/osfmk/arm64/sleh.c	2026-11-03 19:55:02
++++ build/xnu-src/source/osfmk/arm64/sleh.c	2026-11-03 20:22:46
 @@ -26,6 +26,7 @@
   * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
   */
@@ -4059,7 +4059,7 @@ diff -ruN a/osfmk/arm64/sleh.c build/xnu-src/source/osfmk/arm64/sleh.c
  	 * Use KERNEL_DEBUG_CONSTANT_IST here to avoid producing tracepoints
  	 * that would disclose the behavior of PT_DENY_ATTACH processes.
  	 */
-@@ -1861,9 +1882,39 @@
+@@ -1861,9 +1882,52 @@
  	 * sweet: TrustZone owns GIC Group 0, so the timer and IPIs that other
  	 * ARM64 targets take as FIQs arrive here as Group 1 IRQs.
  	 */
@@ -4068,6 +4068,19 @@ diff -ruN a/osfmk/arm64/sleh.c build/xnu-src/source/osfmk/arm64/sleh.c
 +extern int sweet_exit_tid;
  	uint64_t iar = __builtin_arm_rsr64("ICC_IAR1_EL1");
  	uint32_t intid = (uint32_t)(iar & 0xFFFFFF);
++	{
++		extern void sweet_early_evidence(uint64_t, uint64_t, uint64_t,
++		    uint64_t, uint64_t);
++		thread_t sweet_irq_thread = current_thread();
++		static int sweet_fd_records;
++		if (sweet_exit_tid != 0 && sweet_irq_thread != NULL &&
++		    sweet_irq_thread->thread_id == (uint32_t)sweet_exit_tid &&
++		    sweet_fd_records < 6) {
++			sweet_fd_records++;
++			sweet_early_evidence(0xfd, (uint64_t)sweet_irq_thread->thread_id,
++			    (uint64_t)intid, 0, 0);
++	}
++	}
  
 +	/*
 +	 * Count what actually reaches the CPU. Every hang on this port is a thread
@@ -4099,7 +4112,7 @@ diff -ruN a/osfmk/arm64/sleh.c build/xnu-src/source/osfmk/arm64/sleh.c
  	if (intid >= 1020 && intid <= 1023) {
  		return; /* spurious */
  	}
-@@ -2123,6 +2174,10 @@
+@@ -2123,6 +2187,10 @@
  
  	sp = get_saved_state_sp(&context->ss);
  	kernel_stack_bottom = round_page(thread->machine.kstackptr) - KERNEL_STACK_SIZE;
@@ -7369,7 +7382,7 @@ diff -ruN a/osfmk/kern/priority.c build/xnu-src/source/osfmk/kern/priority.c
  	/*
 diff -ruN a/osfmk/kern/sched_prim.c build/xnu-src/source/osfmk/kern/sched_prim.c
 --- a/osfmk/kern/sched_prim.c	2023-08-13 22:06:07
-+++ build/xnu-src/source/osfmk/kern/sched_prim.c	2026-11-03 18:06:44
++++ build/xnu-src/source/osfmk/kern/sched_prim.c	2026-11-03 20:22:00
 @@ -64,6 +64,8 @@
   *
   */
@@ -7425,6 +7438,25 @@ diff -ruN a/osfmk/kern/sched_prim.c build/xnu-src/source/osfmk/kern/sched_prim.c
  	processor_t     processor;
  	thread_t        new_thread;
  	spl_t           s;
+@@ -5624,6 +5658,18 @@
+ 
+ 	assert((thread->state & (TH_RUN | TH_WAIT | TH_UNINT | TH_TERMINATE | TH_TERMINATE2)) == TH_RUN);
+ 	assert(thread->runq == PROCESSOR_NULL);
++	{
++		extern void sweet_early_evidence(uint64_t, uint64_t, uint64_t,
++		    uint64_t, uint64_t);
++		extern int sweet_exit_tid;
++		static int sweet_fa_records;
++		if (sweet_exit_tid != 0 && sweet_fa_records < 6 &&
++		    thread->thread_id == (uint32_t)sweet_exit_tid) {
++			sweet_fa_records++;
++			sweet_early_evidence(0xfa, (uint64_t)thread->thread_id,
++			    (uint64_t)options, (uint64_t)thread->state, 0);
++		}
++	}
+ 
+ #if CONFIG_PREADOPT_TG
+ 	/* We know that the thread is not in the runq by virtue of being in this
 diff -ruN a/osfmk/kern/socd_client.c build/xnu-src/source/osfmk/kern/socd_client.c
 --- a/osfmk/kern/socd_client.c	2023-08-13 22:06:07
 +++ build/xnu-src/source/osfmk/kern/socd_client.c	2026-11-01 23:36:12
