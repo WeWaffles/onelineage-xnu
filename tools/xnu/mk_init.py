@@ -348,7 +348,19 @@ _RAW_CODE = [
     # through into its own loop while the parent branches away.
     #
     ("cbz", 1, "loop"),                                     # x1 == 0 -> parent
-    "kid", ("b", "kid"),                                    # child: spin, no syscall
+    #
+    # The child's first real work: a write, then exit.
+    #
+    # hw/m376 showed both AST paths empty while interrupts keep arriving, so
+    # nothing in this jumped configuration preempts an EL0 thread that never
+    # enters the kernel.  A spin is therefore invisible *and* starves the
+    # parent.  A syscall is the opposite: it proves the child executed at EL0,
+    # and exit() proves it can leave cleanly and hand the CPU back.
+    #
+    "kid", ("movz", 0, 1), ("adr", 1, "msg"), ("movz", 2, len(MSG)),
+    ("movz", 16, SYS_write), ("svc",),
+    ("movz", 0, 0), ("movz", 16, 1), ("svc",),              # exit(0)
+
     "loop", ("movn", 16, 27), ("svc",), ("b", "loop"),      # 28 task_self (parent)
 
 ]
