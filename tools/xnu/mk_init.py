@@ -407,9 +407,18 @@ _RAW_CODE = [
     ("movz", 16, SYS_execve), ("svc",),
     ("movz", 0, 1), ("movz", 16, 1), ("svc",),              # exit(1) if exec returned
 
-    # The exec'd instance: PID != 1, so it skips the fork path entirely and
-    # parks on thread_self (trap 27, distinct from the parent's task_self).
-    "reentered", ("movn", 16, 26), ("svc",), ("b", "reentered"),
+    #
+    # The exec'd instance: PID != 1, so it skips the fork path entirely.  It
+    # runs a bounded 4096-trap loop on thread_self (trap 27, distinct from the
+    # parent's task_self) and exits, so a re-entered image can neither fork
+    # again nor spin forever.  Every one of those traps makes the kernel
+    # rewrite the exec mirrors at 0x9110/0x9140, and the parent's own park
+    # loop keeps them fresh after this process is gone.
+    #
+    "reentered", ("movz", 9, 0x1000),
+    "reloop", ("sub", 9, 9, 1), ("movn", 16, 26), ("svc",),
+    ("cbz", 9, "re_exit"), ("b", "reloop"),
+    "re_exit", ("movz", 0, 0), ("movz", 16, 1), ("svc",),   # exit(0), bounded
 
     "loop", ("movn", 16, 27), ("svc",), ("b", "loop"),      # 28 task_self (parent)
 

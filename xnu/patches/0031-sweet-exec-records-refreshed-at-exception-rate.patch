@@ -1,0 +1,157 @@
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -543,7 +543,13 @@
+ 		    (uint64_t)(PSR64_IS_USER(get_saved_state_cpsr(_ss)) ? 1 : 0));
+ 		sweet_early_write64(_e + 0x28, (uint64_t)(uint32_t)(esr >> 26));
+ 		sweet_early_write64(_e + 0x30, (uint64_t)(uintptr_t)current_thread());
+-		sweet_early_write64(_e + 0x38, 0);
++		/*
++		 * m475: this record only exists when a non-SVC fault happens, so an
++		 * empty slot is normally log text.  A validity word written last
++		 * makes "no record yet" explicit instead of leaving a reader to
++		 * mistake text for a fault.
++		 */
++		sweet_early_write64(_e + 0x38, 0x44494c4156ULL);
+ 		sweet_early_write64(0x9300, (uint64_t)++_sweet_ei);
+ 	}
+ 
+@@ -672,6 +678,16 @@
+ 		sweet_early_write64(_e + 0x38,
+ 		    (uint64_t)(PSR64_IS_USER(get_saved_state_cpsr(&context->ss)) ? 1 : 0));
+ 		sweet_early_write64(0x9100, (uint64_t)++_sweet_ei);
++		/*
++		 * m475: this path runs for every synchronous exception, SVCs
++		 * included, and its own record at 0x9000 is the one that always
++		 * survived the log ring.  Rewriting the exec mirrors here inherits
++		 * that: 0x9110 loaded, 0x9140 enter, both with a validity word.
++		 */
++		{
++			extern void sweet_exec_refresh(void);
++			sweet_exec_refresh();
++		}
+ 	}
+ 
+ 	esr_exception_class_t  class   = ESR_EC(esr);
+--- a/bsd/dev/arm/systemcalls.c
++++ b/bsd/dev/arm/systemcalls.c
+@@ -1053,3 +1053,79 @@
+ #else
+ #error Unknown architecture.
+ #endif
++
++/*
++ * m475: exec evidence that survives the log ring.
++ *
++ * hw/m474 showed 0x8800 and 0x88c0 reading back as kernel-log text: the 2 MiB
++ * buffer is filled with text from base+0x8000 upward (last timestamp at
++ * base+0x19ea99, printable density 100% across it), so a word written once is
++ * only safe if the log never advances past it again.  0x9000 keeps its record
++ * because sleh_synchronous rewrites it on every synchronous exception.  These
++ * four functions give the exec records the same treatment:
++ *
++ *   written once at exec time        0x8800 enter, 0x8840 loaded
++ *   rewritten at exception rate      0x9110 loaded mirror, 0x9140 enter mirror
++ *   counters                         0x88c0 enters, 0x88c8 loads, 0x9128 refreshes
++ *
++ * The mirrors carry the same pid and entry point plus an explicit validity
++ * word, so the decoder can require 0x44494c4156 ("VALID") and report absence
++ * instead of mistaking text for a record.
++ */
++uint64_t sweet_exec_pid_store;
++uint64_t sweet_exec_entry_store;
++uint64_t sweet_exec_path_store;
++unsigned int sweet_exec_pid_valid;
++
++void
++sweet_exec_note_enter(uint32_t pid, uint64_t pathw)
++{
++	extern void sweet_early_write64(uint64_t, uint64_t);
++	static unsigned int enters;
++
++	sweet_exec_pid_store = (uint64_t)pid;
++	sweet_exec_path_store = pathw;
++	sweet_exec_pid_valid = 1;
++	sweet_early_write64(0x8800, 0x4f4c584eULL);
++	sweet_early_write64(0x8808, (uint64_t)pid);
++	sweet_early_write64(0x8810, pathw);
++	sweet_early_write64(0x8818, 0x44494c4156ULL);
++	sweet_early_write64(0x88c0, (uint64_t)++enters);
++}
++
++void
++sweet_exec_note_loaded(uint32_t pid, uint64_t entry)
++{
++	extern void sweet_early_write64(uint64_t, uint64_t);
++	static unsigned int loads;
++
++	sweet_exec_pid_store = (uint64_t)pid;
++	sweet_exec_entry_store = entry;
++	sweet_exec_pid_valid = 1;
++	sweet_early_write64(0x8840, 0x4f4c584eULL);
++	sweet_early_write64(0x8848, (uint64_t)pid);
++	sweet_early_write64(0x8850, entry);
++	sweet_early_write64(0x8858, 0x44494c4156ULL);
++	sweet_early_write64(0x88c8, (uint64_t)++loads);
++}
++
++void
++sweet_exec_refresh(void)
++{
++	extern void sweet_early_write64(uint64_t, uint64_t);
++	static unsigned int refreshes;
++
++	if (!sweet_exec_pid_valid) {
++		return;
++	}
++	sweet_early_write64(0x9110, 0x4f4c584eULL);
++	sweet_early_write64(0x9118, sweet_exec_pid_store);
++	sweet_early_write64(0x9120, sweet_exec_entry_store);
++	sweet_early_write64(0x9128, (uint64_t)++refreshes);
++	sweet_early_write64(0x9130, 0x44494c4156ULL);
++
++	sweet_early_write64(0x9140, 0x4f4c584eULL);
++	sweet_early_write64(0x9148, sweet_exec_pid_store);
++	sweet_early_write64(0x9150, sweet_exec_path_store);
++	sweet_early_write64(0x9158, 0x44494c4156ULL);
++}
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -896,14 +896,10 @@
+ 	 *   0x88c8  execs that reached an entry point
+ 	 */
+ 	{
+-		extern void sweet_early_write64(uint64_t, uint64_t);
+-		static unsigned int sweet_exec_oks;
++		extern void sweet_exec_note_loaded(uint32_t, uint64_t);
+ 
+-		sweet_early_write64(0x8840, 0x4f4c584eULL);
+-		sweet_early_write64(0x8848, (uint64_t)(uint32_t)p->p_pid);
+-		sweet_early_write64(0x8850, (uint64_t)result->entry_point);
+-		sweet_early_write64(0x8858, 0x44494c4156ULL);
+-		sweet_early_write64(0x88c8, (uint64_t)++sweet_exec_oks);
++		sweet_exec_note_loaded((uint32_t)p->p_pid,
++		    (uint64_t)result->entry_point);
+ 	}
+ 
+ 	return KERN_SUCCESS;
+@@ -3460,18 +3456,13 @@
+ 	 * zero: no raw user-pointer load is added and nothing is suppressed.
+ 	 */
+ 	{
+-		extern void sweet_early_write64(uint64_t, uint64_t);
+-		static unsigned int sweet_exec_enters;
++		extern void sweet_exec_note_enter(uint32_t, uint64_t);
+ 		uint64_t pw = 0;
+ 
+ 		if (uap->path != USER_ADDR_NULL) {
+ 			(void)copyin(uap->path, &pw, sizeof(pw));
+ 		}
+-		sweet_early_write64(0x8800, 0x4f4c584eULL);
+-		sweet_early_write64(0x8808, (uint64_t)(uint32_t)p->p_pid);
+-		sweet_early_write64(0x8810, pw);
+-		sweet_early_write64(0x8818, 0x44494c4156ULL);
+-		sweet_early_write64(0x88c0, (uint64_t)++sweet_exec_enters);
++		sweet_exec_note_enter((uint32_t)p->p_pid, pw);
+ 	}
+ 	imgp->ip_user_argv = uap->argv;
+ 	imgp->ip_user_envv = uap->envp;
