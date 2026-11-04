@@ -155,13 +155,15 @@ def decode(d: bytes) -> dict | None:
         m["sleep_addr"] = dict(addr=g(0x9628), pid=g(0x9630))
     if g(0x9640) == 0x52444157:
         m["wake_addr"] = dict(addr=g(0x9648))
+    # NB: do not reuse the name `base` here - g() closes over the ring base.
     trace = []
-    for base, magic, name, aoff, boff in (
+    for tbase, tmagic, tname, taoff, tboff in (
             (0x9660, 0x50454c53, "sleep", 0x9668, 0x9670),
             (0x9680, 0x57415557, "wake", 0x9688, 0x9690),
             (0x96a0, 0x544552, "return", 0x96a8, 0x96b0)):
-        if g(base + 0x18) == magic:
-            trace.append(dict(seq=g(base), event=name, a=g(aoff), b=g(boff)))
+        if g(tbase + 0x18) == tmagic:
+            trace.append(dict(seq=g(tbase), event=tname,
+                              a=g(taoff), b=g(tboff)))
     if trace:
         m["trace"] = sorted(trace, key=lambda e: e["seq"])
     if g(0x9540) == SYS and g(0x9570) == VALID:
