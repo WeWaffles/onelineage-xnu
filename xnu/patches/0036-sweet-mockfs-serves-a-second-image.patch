@@ -1,0 +1,214 @@
+--- a/bsd/miscfs/mockfs/mockfs_fsnode.h
++++ b/bsd/miscfs/mockfs/mockfs_fsnode.h
+@@ -46,10 +46,20 @@
+ enum mockfs_fsnode_type {
+ 	MOCKFS_ROOT,
+ 	MOCKFS_DEV,
+-	MOCKFS_FILE
++	MOCKFS_FILE,
++	MOCKFS_FILE2
+ };
+ 
+ /*
++ * m480: the ramdisk carries two images.  The first MOCKFS_PROG_OFFSET bytes
++ * are the init image (the same file the boot started from); the second image
++ * begins on that boundary and is the program PID 2 execs to prove a distinct
++ * Mach-O loads, rather than the same image re-entering itself.  The offset is
++ * a build-time constant so kernel and ramdisk cannot disagree about it.
++ */
++#define MOCKFS_PROG_OFFSET 0x40000ULL
++
++/*
+  * For the moment, pretend everything is a directory with support for two entries; the
+  *   executable binary is a one-to-one mapping with the backing devnode, so this may
+  *   actually be all we're interested in.
+@@ -59,6 +69,7 @@
+  */
+ struct mockfs_fsnode {
+ 	uint64_t               size;    /* Bytes of data; 0 unless type is MOCKFS_FILE */
++	uint64_t               offset;  /* Byte offset of this file on the backing device */
+ 	uint8_t                type;    /* Serves as a unique identifier for now */
+ 	mount_t                mnt;     /* The mount that this node belongs to */
+ 	vnode_t                vp;      /* vnode for this node (if one exists) */
+@@ -66,6 +77,7 @@
+ 	                                /* TODO: Replace child_a/child_b with something more flexible */
+ 	struct mockfs_fsnode * child_a; /* TEMPORARY */
+ 	struct mockfs_fsnode * child_b; /* TEMPORARY */
++	struct mockfs_fsnode * child_c; /* TEMPORARY: m480 needed a third root child */
+ };
+ 
+ typedef struct mockfs_fsnode * mockfs_fsnode_t;
+--- a/bsd/miscfs/mockfs/mockfs_fsnode.c
++++ b/bsd/miscfs/mockfs/mockfs_fsnode.c
+@@ -59,9 +59,11 @@
+ {
+ 	int rvalue;
+ 	uint64_t new_size;
++	uint64_t new_offset;
+ 
+ 	rvalue = 0;
+ 	new_size = 0;
++	new_offset = 0;
+ 
+ 	if (!fsnpp || !mp) {
+ 		rvalue = EINVAL;
+@@ -75,11 +77,28 @@
+ 		break;
+ 	case MOCKFS_FILE:
+ 		/*
+-		 * For a regular file, size is meaningful, but it will always be equal to the
+-		 * size of the backing device.
++		 * The init image occupies the first MOCKFS_PROG_OFFSET bytes of the
++		 * backing device.  Sizing the node to the whole device would let a
++		 * reader walk into the second image's bytes, so the size is the slot.
+ 		 */
+ 		new_size = mp->mnt_devvp->v_specinfo->si_devsize;
++		if (new_size > MOCKFS_PROG_OFFSET) {
++			new_size = MOCKFS_PROG_OFFSET;
++		}
+ 		break;
++	case MOCKFS_FILE2:
++		/*
++		 * m480: the second image starts at MOCKFS_PROG_OFFSET in the same
++		 * ramdisk.  A device too small for the split leaves the node empty,
++		 * so an exec of it fails in the loader instead of reading past the
++		 * ramdisk.
++		 */
++		new_offset = MOCKFS_PROG_OFFSET;
++		if (mp->mnt_devvp->v_specinfo->si_devsize > MOCKFS_PROG_OFFSET) {
++			new_size = mp->mnt_devvp->v_specinfo->si_devsize -
++			    MOCKFS_PROG_OFFSET;
++		}
++		break;
+ 	default:
+ 		rvalue = EINVAL;
+ 		goto done;
+@@ -87,6 +106,7 @@
+ 
+ 	*fsnpp = kalloc_type(struct mockfs_fsnode, Z_WAITOK | Z_ZERO | Z_NOFAIL);
+ 	(*fsnpp)->size = new_size;
++	(*fsnpp)->offset = new_offset;
+ 	(*fsnpp)->type = type;
+ 	(*fsnpp)->mnt = mp;
+ 
+@@ -145,6 +165,12 @@
+ 		}
+ 	}
+ 
++	if (fsnp->child_c) {
++		if ((rvalue = mockfs_fsnode_destroy(fsnp->child_c))) {
++			panic("mockfs_fsnode_destroy failed on child_c; fsnp = %p (in case gdb is screwing with you), rvalue = %d", fsnp, rvalue);
++		}
++	}
++
+ 	/*
+ 	 * We need to orphan this node before we destroy it.
+ 	 */
+@@ -201,6 +227,9 @@
+ 		child->parent = parent;
+ 	} else if (!parent->child_b) {
+ 		parent->child_b = child;
++		child->parent = parent;
++	} else if (!parent->child_c) {
++		parent->child_c = child;
+ 		child->parent = parent;
+ 	} else {
+ 		rvalue = ENOMEM;
+@@ -243,6 +272,9 @@
+ 	} else if (parent->child_b == fsnp) {
+ 		parent->child_b = NULL;
+ 		fsnp->parent = NULL;
++	} else if (parent->child_c == fsnp) {
++		parent->child_c = NULL;
++		fsnp->parent = NULL;
+ 	} else {
+ 		panic("mockfs_fsnode_orphan insanity, fsnp->parent != parent->child; fsnp = %p (in case gdb is screwing with you)", fsnp);
+ 	}
+@@ -278,6 +310,8 @@
+ 		*child = parent->child_a;
+ 	} else if ((parent->child_b) && (parent->child_b->type == type)) {
+ 		*child = parent->child_b;
++	} else if ((parent->child_c) && (parent->child_c->type == type)) {
++		*child = parent->child_c;
+ 	} else {
+ 		rvalue = ENOENT;
+ 	}
+@@ -322,7 +356,8 @@
+ 		 * We need to create the vnode; this will be unpleasant.
+ 		 */
+ 		vnfs_param.vnfs_mp = fsnp->mnt;
+-		vnfs_param.vnfs_vtype = (fsnp->type == MOCKFS_FILE) ? VREG : VDIR;
++		vnfs_param.vnfs_vtype = (fsnp->type == MOCKFS_FILE ||
++		    fsnp->type == MOCKFS_FILE2) ? VREG : VDIR;
+ 		vnfs_param.vnfs_str = "mockfs";
+ 		vnfs_param.vnfs_dvp = (fsnp->type == MOCKFS_ROOT) ? NULL : fsnp->parent->vp;
+ 		vnfs_param.vnfs_fsnode = fsnp;
+--- a/bsd/miscfs/mockfs/mockfs_vfsops.c
++++ b/bsd/miscfs/mockfs/mockfs_vfsops.c
+@@ -79,6 +79,7 @@
+ 	mockfs_fsnode_t root_fsnode = NULL;
+ 	mockfs_fsnode_t dev_fsnode = NULL;
+ 	mockfs_fsnode_t file_fsnode = NULL;
++	mockfs_fsnode_t prog_fsnode = NULL;
+ 	mockfs_mount_t mockfs_mount_data = NULL;
+ 	dk_memdev_info_t memdev_info;
+ 
+@@ -95,8 +96,10 @@
+ 	mockfs_fsnode_create(mp, MOCKFS_ROOT, &root_fsnode);
+ 	mockfs_fsnode_create(mp, MOCKFS_DEV, &dev_fsnode);
+ 	mockfs_fsnode_create(mp, MOCKFS_FILE, &file_fsnode);
++	/* m480: the second image, so PID 2 can exec something that is not this image */
++	mockfs_fsnode_create(mp, MOCKFS_FILE2, &prog_fsnode);
+ 
+-	if (!root_fsnode || !dev_fsnode || !file_fsnode) {
++	if (!root_fsnode || !dev_fsnode || !file_fsnode || !prog_fsnode) {
+ 		rvalue = ENOMEM;
+ 		goto done;
+ 	}
+@@ -155,6 +158,10 @@
+ 	}
+ 
+ 	if ((rvalue = mockfs_fsnode_adopt(root_fsnode, file_fsnode))) {
++		goto done;
++	}
++
++	if ((rvalue = mockfs_fsnode_adopt(root_fsnode, prog_fsnode))) {
+ 		goto done;
+ 	}
+ 
+@@ -163,6 +170,9 @@
+ 
+ done:
+ 	if (rvalue) {
++		if (prog_fsnode) {
++			mockfs_fsnode_destroy(prog_fsnode);
++		}
+ 		if (file_fsnode) {
+ 			mockfs_fsnode_destroy(file_fsnode);
+ 		}
+--- a/bsd/miscfs/mockfs/mockfs_vnops.c
++++ b/bsd/miscfs/mockfs/mockfs_vnops.c
+@@ -124,6 +124,8 @@
+ 			mockfs_fsnode_child_by_type(fsnode, MOCKFS_DEV, &target_fsnode);
+ 		} else if (!strncmp(cnp->cn_nameptr, "launchd", 8)) {
+ 			mockfs_fsnode_child_by_type(fsnode, MOCKFS_FILE, &target_fsnode);
++		} else if (!strncmp(cnp->cn_nameptr, "prog", 5)) {
++			mockfs_fsnode_child_by_type(fsnode, MOCKFS_FILE2, &target_fsnode);
+ 		} else {
+ 			rvalue = ENOENT;
+ 		}
+@@ -399,7 +401,13 @@
+ 	 *   This also means that their request should always be contiguous, so the run calculation is easy!
+ 	 */
+ 	if (vp->v_type == VREG) {
+-		*bpn = foffset / blksize;
++		/*
++		 * m480: the file's own offset on the backing device, not just its
++		 * offset within itself.  For the init image that offset is zero, so
++		 * this changes nothing there; for the second image it is what keeps
++		 * its blocks distinct from the first image's.
++		 */
++		*bpn = (fsnode->offset + foffset) / blksize;
+ 		*run = fsnode->size - foffset;
+ 
+ 		if (ap->a_size > *run) {

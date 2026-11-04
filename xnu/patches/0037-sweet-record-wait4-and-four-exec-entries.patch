@@ -1,0 +1,94 @@
+--- a/bsd/dev/arm/systemcalls.c
++++ b/bsd/dev/arm/systemcalls.c
+@@ -509,6 +509,24 @@
+ 				sweet_count_syscall((uint32_t)pid,
+ 				    (uint32_t)code);
+ 				sweet_early_write64(0x8730, (uint64_t)(uint32_t)code);
++				if (code == SYS_wait4) {
++					extern unsigned int sweet_wait_calls,
++					sweet_wait_pid, sweet_wait_reaped;
++					extern unsigned int sweet_wait_status,
++					sweet_wait_error;
++					int wst = 0;
++
++					if (uthread->uu_arg[1] != 0) {
++						(void)copyin((user_addr_t)uthread->uu_arg[1],
++						    &wst, sizeof(wst));
++					}
++					sweet_wait_calls++;
++					sweet_wait_pid = (unsigned int)pid;
++					sweet_wait_reaped =
++					    (unsigned int)SWEET_RVAL64(uthread);
++					sweet_wait_status = (unsigned int)wst;
++					sweet_wait_error = (unsigned int)error;
++				}
+ 			}
+ 			/*
+ 			 * Whether the child is alive, asked of the process table.
+@@ -1136,10 +1154,19 @@
+  * can enter more than once; keeping each entry's pid and path word makes the
+  * entered-versus-loaded difference reproducible instead of inferred.
+  */
+-uint64_t sweet_enter_pid[3], sweet_enter_path[3];
++uint64_t sweet_enter_pid[4], sweet_enter_path[4];
+ unsigned int sweet_enter_slots;
+ 
+ /*
++ * m480: the parent's wait4, so a reaped child is evidence rather than an
++ * assumption.  The reaped pid is the syscall's result; the status word is what
++ * the kernel wrote into the caller's memory, copied here while it is still
++ * valid; the error explains a -1.
++ */
++unsigned int sweet_wait_calls, sweet_wait_pid, sweet_wait_reaped;
++unsigned int sweet_wait_status, sweet_wait_error;
++
++/*
+  * m478: syscalls and writes are different things and must not share a name.
+  *
+  * hw/m477 proved the 0x8700 block sits after the "if (code == SYS_write)"
+@@ -1201,7 +1228,7 @@
+ 	} else {
+ 		sweet_exec_enters_other++;
+ 	}
+-	if (sweet_enter_slots < 3) {
++	if (sweet_enter_slots < 4) {
+ 		sweet_enter_pid[sweet_enter_slots] = (uint64_t)pid;
+ 		sweet_enter_path[sweet_enter_slots] = pathw;
+ 		sweet_enter_slots++;
+@@ -1282,8 +1309,9 @@
+ 	 *
+ 	 *   0x9400  magic, pid, fd | length << 32, result, error, seq, VALID
+ 	 *   0x9440  magic, pid, code, seq, VALID
+-	 *   0x9480  one execve entry slot per 0x20, VALID last in each;
+-	 *           0x94e0 counts the entries recorded
++	 *   0x9480  one execve entry slot per 0x20 (four kept), VALID last in
++	 *           each; 0x9520 counts the entries recorded
++	 *   0x9540  the last wait4: pid, reaped pid, status, error, calls, VALID
+ 	 */
+ 	sweet_early_write64(0x9400, 0x4f4c584eULL);
+ 	sweet_early_write64(0x9408, sweet_last_write_pid);
+@@ -1302,7 +1330,7 @@
+ 	{
+ 		unsigned int si;
+ 
+-		for (si = 0; si < 3; si++) {
++		for (si = 0; si < 4; si++) {
+ 			uint64_t so = 0x9480 + (uint64_t)si * 0x20;
+ 
+ 			sweet_early_write64(so, 0x4f4c584eULL);
+@@ -1314,5 +1342,14 @@
+ 			    si < sweet_enter_slots ? 0x44494c4156ULL : 0);
+ 		}
+ 	}
+-	sweet_early_write64(0x94e0, (uint64_t)sweet_enter_slots);
++	sweet_early_write64(0x9520, (uint64_t)sweet_enter_slots);
++
++	/* the parent's reap, if one happened */
++	sweet_early_write64(0x9540, 0x4f4c584eULL);
++	sweet_early_write64(0x9548, (uint64_t)sweet_wait_pid);
++	sweet_early_write64(0x9550, (uint64_t)sweet_wait_reaped);
++	sweet_early_write64(0x9558, (uint64_t)sweet_wait_status);
++	sweet_early_write64(0x9560, (uint64_t)sweet_wait_error);
++	sweet_early_write64(0x9568, (uint64_t)sweet_wait_calls);
++	sweet_early_write64(0x9570, 0x44494c4156ULL);
+ }

@@ -132,12 +132,15 @@ def decode(d: bytes) -> dict | None:
     if g(0x9440) == SYS and g(0x9460) == VALID:
         m["last_syscall"] = dict(pid=g(0x9448), code=g(0x9450), seq=g(0x9458))
     entries = []
-    for si in range(3):
+    for si in range(4):
         so = 0x9480 + si * 0x20
         if g(so) == SYS and g(so + 0x18) == VALID:
             entries.append(dict(pid=g(so + 8), path8=g(so + 0x10)))
     m["enter_slots"] = entries
-    m["enter_count"] = g(0x94e0)
+    m["enter_count"] = g(0x9520)
+    if g(0x9540) == SYS and g(0x9570) == VALID:
+        m["wait"] = dict(pid=g(0x9548), reaped=g(0x9550), status=g(0x9558),
+                          error=g(0x9560), calls=g(0x9568))
     res["mirrors"] = m
     return res
 
@@ -210,6 +213,10 @@ def main() -> int:
     if "last_syscall" in mm:
         e = mm["last_syscall"]
         print(f"  last syscall: pid={e['pid']} code={e['code']} seq={e['seq']}")
+    if "wait" in mm:
+        e = mm["wait"]
+        print(f"  wait4: pid={e['pid']} reaped={e['reaped']} status={e['status']} "
+              f"err={e['error']} calls={e['calls']}")
     if mm.get("enter_slots"):
         print(f"  exec entries recorded: {mm['enter_count']}")
         for i, s in enumerate(mm["enter_slots"]):

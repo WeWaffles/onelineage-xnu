@@ -49,6 +49,7 @@ SYS_mmap, SYS_stat64 = 197, 338
 SYS_fork = 2
 SYS_execve = 59
 SYS_getdirentries64 = 344
+SYS_wait4 = 7
 
 # The code page and the writable page it writes into.
 CODE_VA = 0x100000000 + 0x4000
@@ -195,8 +196,10 @@ def _assemble(insns: list, blobs: dict, abs_labels: dict = None,
 MSG = b"XNU_EL0_OK\n"
 PATH = b"/dev/console\x00"
 LAUNCHDPATH = b"/launchd\x00"
+PROGPATH = b"/prog\x00"
 
-_BLOBS = {"msg": MSG, "path": PATH, "launchdpath": LAUNCHDPATH}
+_BLOBS = {"msg": MSG, "path": PATH, "launchdpath": LAUNCHDPATH,
+          "progpath": PROGPATH}
 
 _RAW_CODE = [
     #
@@ -415,11 +418,35 @@ _RAW_CODE = [
     # rewrite the exec mirrors at 0x9110/0x9140, and the parent's own park
     # loop keeps them fresh after this process is gone.
     #
-    "reentered", ("movz", 9, 0x1000),
-    "reloop", ("sub", 9, 9, 1), ("movn", 16, 26), ("svc",),
-    ("cbz", 9, "re_exit"), ("b", "reloop"),
-    "re_exit", ("movz", 0, 0), ("movz", 16, 1), ("svc",),   # exit(0), bounded
+    #
+    # m480: the exec'd instance no longer loops; it execve()s /prog, a
+    # different Mach-O in the second slot of the same ramdisk.  mockfs serves
+    # "prog" from MOCKFS_PROG_OFFSET, so the loader reads bytes that are not
+    # this image's, and its entry is the one the mirror then records.
+    #
+    # Its fd 1 comes from the dup2 above, which survives exec, so the program
+    # needs no setup of its own to write.  If the exec is refused the image
+    # exits instead of spinning: a refused exec must be visible as an exit
+    # status rather than as silence.
+    #
+    "reentered", ("adr", 23, "argv2"), ("adr", 6, "progpath"),
+    ("str", 6, 23, 0),
+    ("movz", 5, 0), ("str", 5, 23, 8),
+    ("adr", 24, "envp2"), ("str", 5, 24, 0),
+    ("mov", 0, 6), ("mov", 1, 23), ("mov", 2, 24),
+    ("movz", 16, SYS_execve), ("svc",),
+    ("movz", 0, 1), ("movz", 16, 1), ("svc",),              # exit(1) if exec returned
 
+    #
+    # m480: the parent reaps the child it forked.  wait4(-1, &status, 0, 0)
+    # is the only call here whose result the kernel chooses, so the reaped pid
+    # and the status word together say the child really left and what it left
+    # with.  The park that follows keeps the mirrors refreshing after every
+    # other process is gone.
+    #
+    ("movn", 0, 0), ("adr", 1, "status"),
+    ("movz", 2, 0), ("movz", 3, 0),
+    ("movz", 16, SYS_wait4), ("svc",),
     "loop", ("movn", 16, 27), ("svc",), ("b", "loop"),      # 28 task_self (parent)
 
 ]
@@ -430,7 +457,9 @@ ASM_CODE = _assemble(
     abs_labels={"buf": DATA_VA, "portname": DATA_VA + 0x200,
                 "mbox": DATA_VA + 0x400, "rbox": DATA_VA + 0x600,
                 "rbuf": DATA_VA + 0x800, "basep": DATA_VA + 0xa00,
-                "argv": DATA_VA + 0xb00, "envp": DATA_VA + 0xb40},
+                "argv": DATA_VA + 0xb00, "envp": DATA_VA + 0xb40,
+                "argv2": DATA_VA + 0xb80, "envp2": DATA_VA + 0xbc0,
+                "status": DATA_VA + 0xc00},
     code_va=CODE_VA)
 
 # Pad code + data to 16-byte alignment
