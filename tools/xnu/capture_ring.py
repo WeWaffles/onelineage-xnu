@@ -39,6 +39,9 @@ def main() -> int:
     ap.add_argument("--timeout", type=float, default=150.0)
     ap.add_argument("--interval", type=float, default=0.5)
     ap.add_argument("--min-bytes", type=int, default=1_000_000)
+    # Do not touch adb during the jump/reconnect window: polling there competes
+    # with the harness on the same channel and hung m468's harness at 95 s.
+    ap.add_argument("--post-jump-delay", type=float, default=60.0)
     a = ap.parse_args()
     a.outdir.mkdir(parents=True, exist_ok=True)
     aa = (0xAA13).to_bytes(8, "little")
@@ -50,6 +53,7 @@ def main() -> int:
     deadline = time.time() + a.timeout
     seen: set[str] = set()
     reads = 0
+    delayed_done = False
     while time.time() < deadline:
         try:
             armed = a.arm_file.exists() and a.arm_text in a.arm_file.read_text(errors="replace")
@@ -57,6 +61,10 @@ def main() -> int:
             armed = False
         if not armed:
             time.sleep(a.interval)
+            continue
+        if not delayed_done:
+            time.sleep(a.post_jump_delay)
+            delayed_done = True
             continue
         d = read_ring()
         reads += 1
