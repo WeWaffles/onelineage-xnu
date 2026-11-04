@@ -80,18 +80,6 @@ def main() -> int:
     time.sleep(20)
     sh("adb wait-for-device", timeout=180)
 
-    #
-    # KernelSU's su only becomes reachable once the boot finishes (ksud sets it
-    # up from post-fs-data), and on this board that is roughly two minutes after
-    # adb answers.  Waiting a flat 120s from `adb reboot` was not enough: the
-    # m124_run attempt gave up while the phone was still booting.
-    #
-    deadline = time.time() + 300
-    while time.time() < deadline:
-        rc, txt = sh("adb shell getprop sys.boot_completed", timeout=20)
-        if txt.strip() == "1":
-            break
-        time.sleep(5)
 
     if not wait_for_su(time.time() + 180):
         note("su never became available")
@@ -136,6 +124,15 @@ def main() -> int:
     # is the combination m446 ran with, so it is restored; the region and
     # alloc_method checks below still decide whether the result is usable.
     #
+    # The block must be claimed before the display path reaches this pool, and
+    # su can be reachable before /data is mounted, so wait for the file only.
+    deadline = time.time() + 120
+    while time.time() < deadline:
+        rc, _ = adb("test -f /data/local/tmp/olxnu/olxnu_payload2_mod_v21.ko")
+        if rc == 0:
+            break
+        time.sleep(2)
+
     info = ""
     base = 0
     for attempt, size_mb in enumerate((128, 96, 64, 48), start=1):
@@ -159,6 +156,10 @@ def main() -> int:
             break
         _, dmesg = adb("dmesg | tail -6")
         note(f"attempt {attempt} dmesg tail: {dmesg[-300:]}")
+        if base:
+            note(f"loaded at 0x{base:x}; the module is [permanent], so a retry "
+                 "cannot release this block -- stopping instead of stacking windows")
+            break
         adb("rmmod olxnu_payload2_mod_v21")
         time.sleep(1)
     note("payload info:\n" + info)
@@ -218,6 +219,19 @@ def main() -> int:
     # cma_alloc() to an unaligned start; the 2 MB round-up then yields the
     # 0xb7600000 window that m441/m443 already falsified.
     #
+    #
+    # KernelSU's su only becomes reachable once the boot finishes (ksud sets it
+    # up from post-fs-data), and on this board that is roughly two minutes after
+    # adb answers.  Waiting a flat 120s from `adb reboot` was not enough: the
+    # m124_run attempt gave up while the phone was still booting.
+    #
+    deadline = time.time() + 300
+    while time.time() < deadline:
+        rc, txt = sh("adb shell getprop sys.boot_completed", timeout=20)
+        if txt.strip() == "1":
+            break
+        time.sleep(5)
+
     keep_display_awake()
 
     #
