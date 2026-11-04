@@ -47,8 +47,13 @@ def main() -> int:
     aa = (0xAA13).to_bytes(8, "little")
 
     base = read_ring()
-    baseline = hashlib.sha256(base or b"").hexdigest()
-    print(f"baseline {baseline[:12]} bytes={len(base or b'')}", flush=True)
+    # A baseline is only meaningful if the device actually answered: an empty
+    # read would make every later buffer look "changed" and defeat the gate.
+    if base is None or len(base) < a.min_bytes:
+        print("PREFLIGHT_FAIL no baseline ring (device absent or unreadable)", flush=True)
+        return 3
+    baseline = hashlib.sha256(base).hexdigest()
+    print(f"baseline {baseline[:12]} bytes={len(base)}", flush=True)
 
     deadline = time.time() + a.timeout
     seen: set[str] = set()
