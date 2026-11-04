@@ -174,6 +174,9 @@ def _assemble(insns: list, blobs: dict, abs_labels: dict = None,
         elif kind == "b":
             delta = (labels[ins[1]] - len(out)) // 4
             out += struct.pack("<I", 0x14000000 | (delta & 0x3FFFFFF))
+        elif kind == "cbz":
+            delta = (labels[ins[2]] - len(out)) // 4
+            out += struct.pack("<I", 0xB4000000 | ((delta & 0x7FFFF) << 5) | ins[1])
         else:
             raise ValueError(f"unknown instruction {kind}")
     return bytes(out)
@@ -313,7 +316,29 @@ _RAW_CODE = [
     # so both fall into the same getpid loop and the ring carries both answers.
     #
     ("movz", 16, SYS_fork), ("svc",),
-    "loop", ("movz", 16, SYS_getpid), ("svc",), ("b", "loop"),
+    #
+    # The first conditional branch in the payload, and the reason it exists.
+    #
+    # fork's answer is already in x0: 0 in the child, the child's pid in the
+    # parent.  Giving each process a different syscall makes the child's arrival
+    # visible as a code (getuid, 24) that the parent never issues -- hw/m362
+    # could not see the child because the 0xa6 cap of 12 was saturated, and a
+    # measurement should not depend on having a spare slot.
+    #
+    #
+    # The two loops use mach traps, not BSD syscalls.
+    #
+    # hw/m364 could not see the child because the 0xa6 syscall cap was again
+    # exactly spent by the time it ran (7 payload calls + 5 parent getpid = 12).
+    # Mach traps are recorded by the separate 0xb6 budget, and the trap number
+    # itself distinguishes the two processes: 28 (task_self) in the parent,
+    # 26 (mach_reply_port) in the child.  A 0xb6 with trap 26 can only come from
+    # the child, and neither loop can exhaust the other's budget.
+    #
+    ("cbz", 0, "kid"),
+    "loop", ("movn", 16, 27), ("svc",), ("b", "loop"),      # 28 task_self
+    "kid", ("movn", 16, 25), ("svc",), ("b", "kid"),        # 26 mach_reply_port
+
 ]
 ASM_CODE = _assemble(
     [x for ins in _RAW_CODE for x in (_movabs(ins[1], ins[2])
