@@ -112,18 +112,20 @@ def main() -> int:
     #
     # stayon plus a long screen-off timeout keeps it lit through the jump.
     #
-    for cmd, what in (
-        ("input keyevent KEYCODE_WAKEUP", "wake"),
-        ("wm dismiss-keyguard", "unlock"),
-        ("svc power stayon true", "stayon"),
-        ("settings put system screen_off_timeout 1800000", "timeout"),
-    ):
-        rc, txt = adb(cmd)
-        note(f"display {what} rc={rc} {txt.strip()[:80]}")
+    def keep_display_awake() -> None:
+        for cmd, what in (
+            ("input keyevent KEYCODE_WAKEUP", "wake"),
+            ("wm dismiss-keyguard", "unlock"),
+            ("svc power stayon true", "stayon"),
+            ("settings put system screen_off_timeout 1800000", "timeout"),
+        ):
+            rc, txt = adb(cmd)
+            note(f"display {what} rc={rc} {txt.strip()[:80]}")
 
-    rc, txt = adb(
-        "dumpsys power | grep -E 'mWakefulness=|Display Power'")
-    note(f"display state: {txt.strip().replace(chr(10), ' | ')}")
+        rc, txt = adb(
+            "dumpsys power | grep -E 'mWakefulness=|Display Power'")
+        note(f"display state: {txt.strip().replace(chr(10), ' | ')}")
+
 
     #
     # Keep the hint the working runs used, and judge only the result.
@@ -209,6 +211,14 @@ def main() -> int:
             return 1
         note(f"WARNING: payload base {base:#x} differs from {EXPECTED_BASE:#x}; "
              f"continuing because --allow-any-base")
+
+    #
+    # The payload block is claimed before the panel is woken.  The display
+    # path takes the first pages of non_secure_display_region, which pushes
+    # cma_alloc() to an unaligned start; the 2 MB round-up then yields the
+    # 0xb7600000 window that m441/m443 already falsified.
+    #
+    keep_display_awake()
 
     #
     # Publish the kernel that was just built.
