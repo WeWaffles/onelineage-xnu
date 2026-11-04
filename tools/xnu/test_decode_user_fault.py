@@ -110,10 +110,10 @@ def main() -> int:
     check(slot(2) == dp.UF_BASE + 2 * dp.UF_STRIDE, "pid 2 maps to its own slot")
     # pid 1 fills its slot with SVC traffic, then pid 2 faults: the child must
     # still be present, which is exactly what m492 and m495 lost.
-    svc = dict(off=slot(1) - dp.UF_BASE,
+    svc = dict(off=slot(1),
                qwords=[dp.UF_MAGIC, 1, 1, 0x56000080, 0x16fdffef0,
                        0x100004008, 0x15, 0x0])
-    fault = dict(off=slot(2) - dp.UF_BASE,
+    fault = dict(off=slot(2),
                  qwords=[dp.UF_MAGIC, 2, 2, 0x96000005, 0x100004000,
                          0x100000408, 0x25, 0x80000000])
     r3 = dp.decode(synthetic([svc, fault]))
