@@ -1,0 +1,142 @@
+--- a/bsd/dev/arm/systemcalls.c
++++ b/bsd/dev/arm/systemcalls.c
+@@ -427,11 +427,17 @@
+ 				}
+ 			
+ 				extern void sweet_count_write(uint32_t, uint32_t,
+-				    uint32_t);
+-				/* m478: counted where code really is SYS_write */
++				    uint32_t, uint64_t, uint32_t);
++				/*
++				 * m479: counted here, where code really is SYS_write, and
++				 * counted with its outcome attached, so the last record
++				 * cannot be mistaken for a syscall that merely returned a
++				 * small number.
++				 */
+ 				sweet_count_write((uint32_t)pid,
+ 				    (uint32_t)uthread->uu_arg[0],
+-				    (uint32_t)uthread->uu_arg[2]);
++				    (uint32_t)uthread->uu_arg[2],
++				    SWEET_RVAL64(uthread), (uint32_t)error);
+ 			}
+ 			/*
+ 			 * m473: the same write, in slots that cannot rotate.
+@@ -1108,8 +1114,32 @@
+ unsigned int sweet_syscalls_last_code;
+ unsigned int sweet_writes_total, sweet_writes_pid1, sweet_writes_pid2;
+ unsigned int sweet_writes_other, sweet_writes_zero;
++
++/*
++ * m479: the counters above say how many; these say which.  Each holds the
++ * last call of its kind together with the arguments the kernel actually
++ * saw, and sweet_exec_refresh() mirrors them at exception rate, so a reader
++ * gets the final call instead of whichever copy the log ring happened to
++ * keep.
++ */
++uint64_t sweet_last_write_pid;
++uint64_t sweet_last_write_fd_len;      /* fd | length << 32 */
++uint64_t sweet_last_write_result;
++uint32_t sweet_last_write_error;
++unsigned int sweet_last_write_seq;
++uint32_t sweet_last_syscall_pid, sweet_last_syscall_code;
++unsigned int sweet_last_syscall_seq;
+ 
+ /*
++ * One slot per execve entry, first three kept.  load_init_program walks
++ * init_programs[] and every candidate reaches __mac_execve, so PID 1 alone
++ * can enter more than once; keeping each entry's pid and path word makes the
++ * entered-versus-loaded difference reproducible instead of inferred.
++ */
++uint64_t sweet_enter_pid[3], sweet_enter_path[3];
++unsigned int sweet_enter_slots;
++
++/*
+  * m478: syscalls and writes are different things and must not share a name.
+  *
+  * hw/m477 proved the 0x8700 block sits after the "if (code == SYS_write)"
+@@ -1123,6 +1153,9 @@
+ {
+ 	sweet_syscalls_total++;
+ 	sweet_syscalls_last_code = code;
++	sweet_last_syscall_pid = pid;
++	sweet_last_syscall_code = code;
++	sweet_last_syscall_seq++;
+ 	if (pid == 1) {
+ 		sweet_syscalls_pid1++;
+ 	} else if (pid == 2) {
+@@ -1133,9 +1166,14 @@
+ }
+ 
+ void
+-sweet_count_write(uint32_t pid, uint32_t fd, uint32_t len)
++sweet_count_write(uint32_t pid, uint32_t fd, uint32_t len,
++    uint64_t result, uint32_t error)
+ {
+-	(void)fd;
++	sweet_last_write_pid = (uint64_t)pid;
++	sweet_last_write_fd_len = (uint64_t)fd | ((uint64_t)len << 32);
++	sweet_last_write_result = result;
++	sweet_last_write_error = error;
++	sweet_last_write_seq++;
+ 	sweet_writes_total++;
+ 	if (pid == 1) {
+ 		sweet_writes_pid1++;
+@@ -1163,6 +1201,11 @@
+ 	} else {
+ 		sweet_exec_enters_other++;
+ 	}
++	if (sweet_enter_slots < 3) {
++		sweet_enter_pid[sweet_enter_slots] = (uint64_t)pid;
++		sweet_enter_path[sweet_enter_slots] = pathw;
++		sweet_enter_slots++;
++	}
+ 	sweet_exec_pid_store = (uint64_t)pid;
+ 	sweet_exec_path_store = pathw;
+ 	sweet_exec_pid_valid = 1;
+@@ -1230,4 +1273,46 @@
+ 	sweet_early_write64(0x91d0, (uint64_t)sweet_writes_pid2);
+ 	sweet_early_write64(0x91d8, (uint64_t)sweet_writes_zero);
+ 	sweet_early_write64(0x91e0, 0x44494c4156ULL);
++
++	/*
++	 * m479: the final call of each kind, with its arguments.  The counters
++	 * above say how many writes happened; this says which write was last,
++	 * which is what separates a real zero-length write from a getpid whose
++	 * result was once mistaken for one.
++	 *
++	 *   0x9400  magic, pid, fd | length << 32, result, error, seq, VALID
++	 *   0x9440  magic, pid, code, seq, VALID
++	 *   0x9480  one execve entry slot per 0x20, VALID last in each;
++	 *           0x94e0 counts the entries recorded
++	 */
++	sweet_early_write64(0x9400, 0x4f4c584eULL);
++	sweet_early_write64(0x9408, sweet_last_write_pid);
++	sweet_early_write64(0x9410, sweet_last_write_fd_len);
++	sweet_early_write64(0x9418, sweet_last_write_result);
++	sweet_early_write64(0x9420, (uint64_t)sweet_last_write_error);
++	sweet_early_write64(0x9428, (uint64_t)sweet_last_write_seq);
++	sweet_early_write64(0x9430, 0x44494c4156ULL);
++
++	sweet_early_write64(0x9440, 0x4f4c584eULL);
++	sweet_early_write64(0x9448, (uint64_t)sweet_last_syscall_pid);
++	sweet_early_write64(0x9450, (uint64_t)sweet_last_syscall_code);
++	sweet_early_write64(0x9458, (uint64_t)sweet_last_syscall_seq);
++	sweet_early_write64(0x9460, 0x44494c4156ULL);
++
++	{
++		unsigned int si;
++
++		for (si = 0; si < 3; si++) {
++			uint64_t so = 0x9480 + (uint64_t)si * 0x20;
++
++			sweet_early_write64(so, 0x4f4c584eULL);
++			sweet_early_write64(so + 8, si < sweet_enter_slots ?
++			    sweet_enter_pid[si] : 0);
++			sweet_early_write64(so + 0x10, si < sweet_enter_slots ?
++			    sweet_enter_path[si] : 0);
++			sweet_early_write64(so + 0x18,
++			    si < sweet_enter_slots ? 0x44494c4156ULL : 0);
++		}
++	}
++	sweet_early_write64(0x94e0, (uint64_t)sweet_enter_slots);
+ }

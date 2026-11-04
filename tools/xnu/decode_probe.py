@@ -18,6 +18,7 @@ import argparse, hashlib, pathlib, re, struct, subprocess, sys
 AA = (0xAA13).to_bytes(8, "little")
 PROOF = 0x313053534E584C4F
 SYS = 0x4F4C584E
+VALID = 0x44494C4156     # "VALID", written last into every mirror record
 EXC_MAGIC = 0x4F4C584E   # what sleh.c writes into every 0x9000/0x9200 record
 MIN_BYTES = 2_000_000
 WINDOW = 0x40000
@@ -103,6 +104,41 @@ def decode(d: bytes) -> dict | None:
         b = 0x8e00 + k * 0x40
         if g(b) == SYS:
             res["mmap"].append(dict(errno=g(b+16), rval64=g(b+32), afterlast=g(b+56)))
+    #
+    # Fixed-slot mirrors that sleh_synchronous rewrites on every synchronous
+    # exception, so they survive the log ring rotating.  A slot counts only
+    # when both its magic and its trailing VALID word are present; anything
+    # else is log text and is reported absent rather than decoded.
+    #
+    m: dict = {}
+    if g(0x9110) == SYS and g(0x9130) == VALID:
+        m["exec"] = dict(pid=g(0x9118), entry=g(0x9120), refreshes=g(0x9128))
+    if g(0x9140) == SYS and g(0x9158) == VALID:
+        m["enter"] = dict(pid=g(0x9148), path8=g(0x9150))
+    if g(0x9160) == SYS and g(0x9188) == VALID:
+        m["enters"] = dict(total=g(0x9168), pid1=g(0x9170),
+                           pid2=g(0x9178), other=g(0x9180))
+    if g(0x9190) == SYS and g(0x91e0) == VALID:
+        m["counts"] = dict(loads=g(0x9198), syscalls=g(0x91a0),
+                           sys_pid1=g(0x91a8), sys_pid2=g(0x91b0),
+                           sys_other=g(0x91b8), writes=g(0x91c0),
+                           w_pid1=g(0x91c8), w_pid2=g(0x91d0),
+                           w_zero=g(0x91d8))
+    if g(0x9400) == SYS and g(0x9430) == VALID:
+        fdlen = g(0x9410)
+        m["last_write"] = dict(pid=g(0x9408), fd=fdlen & 0xFFFFFFFF,
+                               length=fdlen >> 32, result=g(0x9418),
+                               error=g(0x9420), seq=g(0x9428))
+    if g(0x9440) == SYS and g(0x9460) == VALID:
+        m["last_syscall"] = dict(pid=g(0x9448), code=g(0x9450), seq=g(0x9458))
+    entries = []
+    for si in range(3):
+        so = 0x9480 + si * 0x20
+        if g(so) == SYS and g(so + 0x18) == VALID:
+            entries.append(dict(pid=g(so + 8), path8=g(so + 0x10)))
+    m["enter_slots"] = entries
+    m["enter_count"] = g(0x94e0)
+    res["mirrors"] = m
     return res
 
 
@@ -146,6 +182,38 @@ def main() -> int:
         print(f"  sys[{i}] code={s['code']} err={s['err']} pid={s['pid']} arg0={s['arg0']} afterlast={s['afterlast']}")
     for i, m in enumerate(r["mmap"]):
         print(f"  mmapret[{i}] errno={m['errno']} rval64={m['rval64']:#x} afterlast={m['afterlast']}")
+
+    def path_str(w: int) -> str:
+        raw = w.to_bytes(8, "little")
+        return "".join(chr(b) if 32 <= b < 127 else "." for b in raw)
+
+    mm = r.get("mirrors", {})
+    print(f"  mirrors present: {', '.join(sorted(mm)) or 'none'}")
+    if "exec" in mm:
+        e = mm["exec"]
+        print(f"  mirror exec: pid={e['pid']} entry={e['entry']:#x} refreshes={e['refreshes']}")
+    if "enter" in mm:
+        e = mm["enter"]
+        print(f"  mirror enter: pid={e['pid']} path8={e['path8']:#x} '{path_str(e['path8'])}'")
+    if "enters" in mm:
+        e = mm["enters"]
+        print(f"  execs entered: total={e['total']} pid1={e['pid1']} pid2={e['pid2']} other={e['other']}")
+    if "counts" in mm:
+        e = mm["counts"]
+        print(f"  execs loaded: {e['loads']}")
+        print(f"  syscalls: total={e['syscalls']} pid1={e['sys_pid1']} pid2={e['sys_pid2']} other={e['sys_other']}")
+        print(f"  writes: total={e['writes']} pid1={e['w_pid1']} pid2={e['w_pid2']} zero_len={e['w_zero']}")
+    if "last_write" in mm:
+        e = mm["last_write"]
+        print(f"  last write: pid={e['pid']} fd={e['fd']} len={e['length']} "
+              f"result={e['result']} err={e['error']} seq={e['seq']}")
+    if "last_syscall" in mm:
+        e = mm["last_syscall"]
+        print(f"  last syscall: pid={e['pid']} code={e['code']} seq={e['seq']}")
+    if mm.get("enter_slots"):
+        print(f"  exec entries recorded: {mm['enter_count']}")
+        for i, s in enumerate(mm["enter_slots"]):
+            print(f"  enter[{i}] pid={s['pid']} path8={s['path8']:#x} '{path_str(s['path8'])}'")
 
     recs = [("exc", e) for e in r["exc"]] + [("exc2", e) for e in r["exc2"]]
     if recs:
