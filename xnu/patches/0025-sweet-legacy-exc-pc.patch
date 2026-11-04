@@ -1,0 +1,29 @@
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -656,14 +656,24 @@
+ 		sweet_early_write64(_e + 0x00, 0x4f4c584eULL);
+ 		sweet_early_write64(_e + 0x08, (uint64_t)esr);
+ 		sweet_early_write64(_e + 0x10, (uint64_t)far);
+ 		sweet_early_write64(_e + 0x18, (uint64_t)(uintptr_t)context);
+ 		sweet_early_write64(_e + 0x20, (uint64_t)(uintptr_t)current_thread());
+ 		sweet_early_write64(_e + 0x28, (uint64_t)(uint32_t)(esr >> 26));
+-		sweet_early_write64(_e + 0x30, 0);
+-		sweet_early_write64(_e + 0x38, 0);
++		/*
++		 * m468: the filtered 0x9200 record is written exactly where the
++		 * post-reset log ring resumes, so it is the first thing a later boot
++		 * overwrites (25 s and 60 s captures both lost it).  These two qwords
++		 * were unused, and this record demonstrably survives (it sat behind
++		 * the resume pointer in every capture), so the faulting PC and the
++		 * user flag go here where they persist.
++		 */
++		sweet_early_write64(_e + 0x30,
++		    (uint64_t)get_saved_state_pc(&context->ss));
++		sweet_early_write64(_e + 0x38,
++		    (uint64_t)(PSR64_IS_USER(get_saved_state_cpsr(&context->ss)) ? 1 : 0));
+ 		sweet_early_write64(0x9100, (uint64_t)++_sweet_ei);
+ 	}
+ 
+ 	esr_exception_class_t  class   = ESR_EC(esr);
+ 	arm_saved_state_t    * state   = &context->ss;
+ 	thread_t               thread  = current_thread();
