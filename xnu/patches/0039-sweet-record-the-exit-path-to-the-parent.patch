@@ -1,0 +1,52 @@
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -2102,6 +2102,16 @@
+ 	extern int sweet_exit_tid;
+ 
+ 	sweet_exit_tid = (int)thread_tid(current_thread());
++
++	/* m483: proc_exit was entered (magic written last). */
++	{
++		extern void sweet_early_write64(uint64_t, uint64_t);
++
++		sweet_early_write64(0x95c8, (uint64_t)(uint32_t)proc_getpid(p));
++		sweet_early_write64(0x95d0,
++		    (uint64_t)(uint32_t)thread_tid(current_thread()));
++		sweet_early_write64(0x95c0, 0x49584550ULL);
++	}
+ 
+ 	/*
+ 	 *   0xd2  a = pid, b = exiting thread id
+@@ -2731,13 +2741,32 @@
+ 		 * The current process can be reaped so, no one
+ 		 * can depend on this
+ 		 */
++
++		/* m483: the zombie is set and the parent is about to be woken. */
++		{
++			extern void sweet_early_write64(uint64_t, uint64_t);
+ 
++			sweet_early_write64(0x95e8, (uint64_t)(uint32_t)pid);
++			sweet_early_write64(0x95f0,
++			    (uint64_t)(uint32_t)proc_getpid(pp));
++			sweet_early_write64(0x95f8, (uint64_t)(uint32_t)p->p_stat);
++			sweet_early_write64(0x95e0, 0x424d4f5aULL);
++		}
+ 		psignal(pp, SIGCHLD);
+ 
+ 		/* and now wakeup the parent */
+ 		proc_list_lock();
+ 		wakeup((caddr_t)pp);
+ 		proc_list_unlock();
++		/* m483: wakeup(pp) has returned. */
++		{
++			extern void sweet_early_write64(uint64_t, uint64_t);
++
++			sweet_early_write64(0x9608, (uint64_t)(uint32_t)pid);
++			sweet_early_write64(0x9610,
++			    (uint64_t)(uint32_t)proc_getpid(pp));
++			sweet_early_write64(0x9600, 0x454b4157ULL);
++		}
+ 	} else {
+ 		/* should be fine as parent proc would be initproc */
+ 		/* mark as a zombie */

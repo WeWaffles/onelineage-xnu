@@ -144,6 +144,13 @@ def decode(d: bytes) -> dict | None:
     if g(0x95b8) == 0x54495845:
         m["exit_enter"] = dict(calls=g(0x95a0), pid=g(0x95a8),
                                status=g(0x95b0))
+    if g(0x95c0) == 0x49584550:
+        m["proc_exit"] = dict(pid=g(0x95c8), tid=g(0x95d0))
+    if g(0x95e0) == 0x424d4f5a:
+        m["zombie"] = dict(pid=g(0x95e8), ppid=g(0x95f0),
+                           p_stat=g(0x95f8))
+    if g(0x9600) == 0x454b4157:
+        m["wake_done"] = dict(pid=g(0x9608), ppid=g(0x9610))
     if g(0x9540) == SYS and g(0x9570) == VALID:
         m["wait"] = dict(pid=g(0x9548), reaped=g(0x9550), status=g(0x9558),
                           error=g(0x9560), calls=g(0x9568))
@@ -231,6 +238,16 @@ def main() -> int:
         e = mm["exit_enter"]
         print(f"  exit entered: calls={e['calls']} pid={e['pid']} "
               f"status={e['status']}")
+    if "proc_exit" in mm:
+        e = mm["proc_exit"]
+        print(f"  proc_exit entered: pid={e['pid']} tid={e['tid']}")
+    if "zombie" in mm:
+        e = mm["zombie"]
+        print(f"  zombie before wakeup: pid={e['pid']} ppid={e['ppid']} "
+              f"p_stat={e['p_stat']}")
+    if "wake_done" in mm:
+        e = mm["wake_done"]
+        print(f"  wakeup returned: pid={e['pid']} ppid={e['ppid']}")
     if mm.get("enter_slots"):
         print(f"  exec entries recorded: {mm['enter_count']}")
         for i, s in enumerate(mm["enter_slots"]):
