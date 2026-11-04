@@ -7742,8 +7742,8 @@ diff -ruN a/osfmk/kern/task.c build/xnu-src/source/osfmk/kern/task.c
  	boolean_t                       interrupt_save;
 diff -ruN a/osfmk/kern/thread.c build/xnu-src/source/osfmk/kern/thread.c
 --- a/osfmk/kern/thread.c	2023-08-13 22:06:07
-+++ build/xnu-src/source/osfmk/kern/thread.c	2026-11-03 19:59:43
-@@ -622,21 +622,101 @@
++++ build/xnu-src/source/osfmk/kern/thread.c	2026-11-03 20:05:10
+@@ -622,21 +622,102 @@
  		subcode = proc_encode_exit_exception_code(bsd_info);
  		proc_exit(bsd_info);
  		bsd_info = NULL;
@@ -7769,7 +7769,8 @@ diff -ruN a/osfmk/kern/thread.c build/xnu-src/source/osfmk/kern/thread.c
 +		if (sweet_ed_records < 4) {
 +			sweet_ed_records++;
 +			sweet_early_evidence(0xed, (uint64_t)current_thread()->thread_id,
-+			    (uint64_t)task->corpse_info, 0, 0);
++			    (uint64_t)task->corpse_info, (uint64_t)thread->state,
++			    (uint64_t)preemption_enabled());
 +		}
 +	}
  		if (task->corpse_info) {
@@ -7845,7 +7846,7 @@ diff -ruN a/osfmk/kern/thread.c build/xnu-src/source/osfmk/kern/thread.c
  	if (threadcnt == 0) {
  		task_lock(task);
  		if (task_is_a_corpse_fork(task)) {
-@@ -645,6 +725,26 @@
+@@ -645,6 +726,26 @@
  		task_unlock(task);
  	}
  
@@ -7872,7 +7873,7 @@ diff -ruN a/osfmk/kern/thread.c build/xnu-src/source/osfmk/kern/thread.c
  	s = splsched();
  	thread_lock(thread);
  
-@@ -744,6 +844,16 @@
+@@ -744,6 +845,16 @@
  
  	thread_block((thread_continue_t)thread_terminate_continue);
  	/*NOTREACHED*/
