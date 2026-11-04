@@ -1,0 +1,71 @@
+--- a/osfmk/console/serial_console.c
++++ b/osfmk/console/serial_console.c
+@@ -514,12 +514,13 @@
+ {
+ 	assert(str != NULL);
+ 
+ 	char *write_ptr = NULL;
+ 	int chunk_size = CPU_CONS_BUF_SIZE;
+ 	int i = 0;
++	bool defer_flush = false;
+ 
+ 	if (__improbable(console_suspended || !is_console_initialized() || pmap_in_ppl())) {
+ 		/*
+ 		 * Output directly to console in the following cases:
+ 		 * 1. If this is early in boot before the console has been initialized.
+ 		 * 2. If we're heading into suspend.
+@@ -529,12 +530,24 @@
+ 		 * 4. If we're in the PPL. As we synchronize the ring buffer with a
+ 		 *    mutex and preemption is disabled in the PPL, any writes must go
+ 		 *    directly to the hardware device.
+ 		 */
+ 		_cnputs(str, size, true);
+ 		return;
++	} else if (__improbable(!ml_get_interrupts_enabled() &&
++	    startup_phase >= STARTUP_SUB_EARLY_BOOT &&
++	    !allow_printf_from_interrupts_disabled_context)) {
++		/*
++		 * m470: interrupt-disabled context, after early boot, with the
++		 * console policy on.  Buffer the message and leave the drain to
++		 * a context with interrupts enabled.  Nothing here touches the
++		 * hardware device, so console_io_allowed()'s rule is not
++		 * relaxed -- the flush path still refuses to run without
++		 * interrupts.
++		 */
++		defer_flush = true;
+ 	} else if (__improbable(!console_io_allowed())) {
+ 		return;
+ 	}
+ 
+ 	while (size > 0) {
+ 		/**
+@@ -550,13 +563,13 @@
+ 		 * Attempt to reserve space in the ring buffer and if that fails, then
+ 		 * keep attempting to drain the ring buffer until there's enough space.
+ 		 * We can't flush the serial console with preemption disabled so return
+ 		 * early to drop the message in that case.
+ 		 */
+ 		while ((write_ptr = console_ring_reserve_space(chunk_size)) == NULL) {
+-			if (get_preemption_level() != 0) {
++			if (defer_flush || get_preemption_level() != 0) {
+ 				return;
+ 			}
+ 
+ 			console_ring_try_empty(false);
+ 		}
+ 
+@@ -567,13 +580,13 @@
+ 		console_ring_unreserve_space();
+ 		str = &str[i];
+ 		size -= chunk_size;
+ 	}
+ 
+ 	/* Do good faith flush if preemption is not disabled */
+-	if (get_preemption_level() == 0) {
++	if (!defer_flush && get_preemption_level() == 0) {
+ 		console_ring_try_empty(true);
+ 	}
+ }
+ 
+ /**
+  * Output a character directly to the underlying console (either video or serial).
