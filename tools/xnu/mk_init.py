@@ -47,6 +47,7 @@ SYS_getpid, SYS_write, SYS_open, SYS_read, SYS_getuid = 20, 4, 5, 3, 24
 SYS_dup2 = 90
 SYS_mmap, SYS_stat64 = 197, 338
 SYS_fork = 2
+SYS_execve = 59
 SYS_getdirentries64 = 344
 
 # The code page and the writable page it writes into.
@@ -59,6 +60,12 @@ def _movz(rd: int, imm: int, shift: int = 0) -> int:
     assert 0 <= imm <= 0xFFFF
     assert shift in (0, 16, 32, 48)
     return 0xD2800000 | ((shift // 16) << 21) | (imm << 5) | rd
+
+
+def _sub(rd: int, rn: int, imm: int) -> int:
+    """sub <rd>, <rn>, #imm  (64-bit, imm12)."""
+    assert 0 <= imm <= 0xFFF
+    return 0xD1000000 | (imm << 10) | (rn << 5) | rd
 
 
 def _movn(rd: int, imm: int) -> int:
@@ -155,6 +162,8 @@ def _assemble(insns: list, blobs: dict, abs_labels: dict = None,
             out += struct.pack("<I", _str32(ins[1], ins[2], ins[3]))
         elif kind == "lsl":
             out += struct.pack("<I", _lsl(ins[1], ins[2], ins[3]))
+        elif kind == "sub":
+            out += struct.pack("<I", _sub(ins[1], ins[2], ins[3]))
         elif kind == "movn":
             out += struct.pack("<I", _movn(ins[1], ins[2]))
         elif kind == "svc":
@@ -207,6 +216,17 @@ _RAW_CODE = [
     #   mach    task_self, thread_self, host_self, mach_reply_port
     #
     ("movz", 16, SYS_getpid), ("svc",),
+    #
+    # m474: only PID 1 forks.  ...
+    #
+    # The child this payload creates now execve()s /sbin/launchd, and mockfs
+    # serves that name from the ramdisk -- which is this same image.  Without a
+    # gate the re-entered program would fork again, forever.  getpid() is the
+    # cheapest discriminator there is: PID 1 is the original instance, anything
+    # else has already come back through exec and only needs to run.
+    #
+    ("sub", 0, 0, 1), ("cbz", 0, "first"), ("b", "reentered"),
+    "first",
     ("movz", 16, SYS_open), ("adr", 0, "path"), ("movz", 1, 6), ("svc",),
     ("mov", 19, 0),
     #
@@ -372,7 +392,24 @@ _RAW_CODE = [
     #
     "kid", ("movz", 0, 1), ("adr", 1, "msg"), ("movz", 2, len(MSG)),
     ("movz", 16, SYS_write), ("svc",),
-    ("movz", 0, 0), ("movz", 16, 1), ("svc",),              # exit(0)
+    #
+    # m474: the child becomes launchd.  ...
+    #
+    # /sbin/launchd resolves through mockfs ("sbin" to the root, "launchd" to
+    # the ramdisk image), so this is the same exec PID 1 performed to get here.
+    # argv/envp live in __DATA: argv = { path, NULL }, envp = { NULL }.
+    #
+    ("adr", 23, "argv"), ("adr", 6, "launchdpath"),
+    ("str", 6, 23, 0),
+    ("movz", 5, 0), ("str", 5, 23, 8),
+    ("adr", 24, "envp"), ("str", 5, 24, 0),
+    ("mov", 0, 6), ("mov", 1, 23), ("mov", 2, 24),
+    ("movz", 16, SYS_execve), ("svc",),
+    ("movz", 0, 1), ("movz", 16, 1), ("svc",),              # exit(1) if exec returned
+
+    # The exec'd instance: PID != 1, so it skips the fork path entirely and
+    # parks on thread_self (trap 27, distinct from the parent's task_self).
+    "reentered", ("movn", 16, 26), ("svc",), ("b", "reentered"),
 
     "loop", ("movn", 16, 27), ("svc",), ("b", "loop"),      # 28 task_self (parent)
 
@@ -383,7 +420,8 @@ ASM_CODE = _assemble(
     _BLOBS,
     abs_labels={"buf": DATA_VA, "portname": DATA_VA + 0x200,
                 "mbox": DATA_VA + 0x400, "rbox": DATA_VA + 0x600,
-                "rbuf": DATA_VA + 0x800, "basep": DATA_VA + 0xa00},
+                "rbuf": DATA_VA + 0x800, "basep": DATA_VA + 0xa00,
+                "argv": DATA_VA + 0xb00, "envp": DATA_VA + 0xb40},
     code_va=CODE_VA)
 
 # Pad code + data to 16-byte alignment

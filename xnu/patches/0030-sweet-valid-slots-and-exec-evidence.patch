@@ -1,0 +1,124 @@
+--- a/bsd/dev/arm/systemcalls.c
++++ b/bsd/dev/arm/systemcalls.c
+@@ -447,17 +447,31 @@
+ 			{
+ 				extern void sweet_early_write64(uint64_t, uint64_t);
+ 				static unsigned int sweet_w_seen, sweet_w_failed;
+-				uint64_t z = 0;
++				static const char sweet_marker[12] = "XNU_EL0_OK\n";
++				uint64_t z = 0, mw = 0;
++				int mi;
+ 
++				/*
++				 * m474: the comparison word is derived from the marker itself
++				 * instead of being a literal.  hw/m473 compared against
++				 * 0x0a304c455f554e58 ("XNU_EL0\n") while the payload sends
++				 * "XNU_EL0_OK\n": the bytes were right and the flag read 0.
++				 * Deriving it here cannot go stale against the string.
++				 */
++				for (mi = 7; mi >= 0; mi--) {
++					mw = (mw << 8) | (uint64_t)(uint8_t)sweet_marker[mi];
++				}
+ 				if (copyin((user_addr_t)uthread->uu_arg[1], &z,
+ 				    sizeof(z)) == 0) {
+ 					sweet_early_write64(0x8740, 0x4f4c584eULL);
+ 					sweet_early_write64(0x8748, z);
+ 					sweet_early_write64(0x8750,
+-					    (z == 0x0a304c455f554e58ULL) ? 1 : 0);
++					    (z == mw) ? 1 : 0);
+ 					sweet_early_write64(0x8758,
+ 					    (uint64_t)(uint32_t)pid);
+ 					sweet_early_write64(0x8760, uthread->uu_arg[2]);
++					sweet_early_write64(0x8768,
++					    0x44494c4156ULL); /* "VALID", written last */
+ 				}
+ 				sweet_early_write64(0x8700, 0x4f4c584eULL);
+ 				sweet_early_write64(0x8708, (uint64_t)(uint32_t)pid);
+@@ -466,11 +480,17 @@
+ 				    ((uint64_t)(uint32_t)uthread->uu_arg[2] << 32));
+ 				sweet_early_write64(0x8718, SWEET_RVAL64(uthread));
+ 				sweet_early_write64(0x8720, (uint64_t)(uint32_t)error);
++				sweet_early_write64(0x8728, 0x44494c4156ULL);
++				/*
++				 * m474: both counters every time.  hw/m473 left 0x87c8
++				 * unwritten when nothing failed, so a dump read stale memory
++				 * (7813872249976400944) where a zero belonged.
++				 */
+ 				sweet_early_write64(0x87c0, (uint64_t)++sweet_w_seen);
+ 				if (error != 0) {
+-					sweet_early_write64(0x87c8,
+-					    (uint64_t)++sweet_w_failed);
++					sweet_w_failed++;
+ 				}
++				sweet_early_write64(0x87c8, (uint64_t)sweet_w_failed);
+ 			}
+ 			/*
+ 			 * Whether the child is alive, asked of the process table.
+--- a/bsd/kern/kern_fork.c
++++ b/bsd/kern/kern_fork.c
+@@ -675,7 +675,8 @@
+ 				sweet_early_write64(0x8798,
+ 				    (uint64_t)(uint32_t)cdp->fd_afterlast);
+ 				sweet_early_write64(0x87a0, bits);
+-				sweet_early_write64(0x87a8,
++				sweet_early_write64(0x87a8, 0x44494c4156ULL);
++				sweet_early_write64(0x87d0,
+ 				    (uint64_t)++sweet_fork_slots);
+ 			}
+ 		}
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -889,7 +889,23 @@
+ 	}
+ 
+ 	thread_setentrypoint(thread, result->entry_point);
++	/*
++	 * m474: the image loaded and its entry point is what will run.
++	 *
++	 *   0x8840  magic, pid, entry point, validity
++	 *   0x88c8  execs that reached an entry point
++	 */
++	{
++		extern void sweet_early_write64(uint64_t, uint64_t);
++		static unsigned int sweet_exec_oks;
+ 
++		sweet_early_write64(0x8840, 0x4f4c584eULL);
++		sweet_early_write64(0x8848, (uint64_t)(uint32_t)p->p_pid);
++		sweet_early_write64(0x8850, (uint64_t)result->entry_point);
++		sweet_early_write64(0x8858, 0x44494c4156ULL);
++		sweet_early_write64(0x88c8, (uint64_t)++sweet_exec_oks);
++	}
++
+ 	return KERN_SUCCESS;
+ }
+ 
+@@ -3434,6 +3450,29 @@
+ 
+ 	/* Initialize the common data in the image_params structure */
+ 	imgp->ip_user_fname = uap->path;
++	/*
++	 * m474: exec entry, in slots that cannot rotate.
++	 *
++	 *   0x8800  magic, pid, first 8 bytes of the path (copyin), validity
++	 *   0x88c0  execs entered
++	 *
++	 * The path bytes come through copyin() and a fault simply leaves the word
++	 * zero: no raw user-pointer load is added and nothing is suppressed.
++	 */
++	{
++		extern void sweet_early_write64(uint64_t, uint64_t);
++		static unsigned int sweet_exec_enters;
++		uint64_t pw = 0;
++
++		if (uap->path != USER_ADDR_NULL) {
++			(void)copyin(uap->path, &pw, sizeof(pw));
++		}
++		sweet_early_write64(0x8800, 0x4f4c584eULL);
++		sweet_early_write64(0x8808, (uint64_t)(uint32_t)p->p_pid);
++		sweet_early_write64(0x8810, pw);
++		sweet_early_write64(0x8818, 0x44494c4156ULL);
++		sweet_early_write64(0x88c0, (uint64_t)++sweet_exec_enters);
++	}
+ 	imgp->ip_user_argv = uap->argv;
+ 	imgp->ip_user_envv = uap->envp;
+ 	imgp->ip_vattr = vap;
