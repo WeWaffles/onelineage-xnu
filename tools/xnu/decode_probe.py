@@ -138,6 +138,12 @@ def decode(d: bytes) -> dict | None:
             entries.append(dict(pid=g(so + 8), path8=g(so + 0x10)))
     m["enter_slots"] = entries
     m["enter_count"] = g(0x9520)
+    if g(0x9598) == 0x54524157:
+        m["wait_enter"] = dict(calls=g(0x9580), pid=g(0x9588),
+                               arg0=g(0x9590))
+    if g(0x95b8) == 0x54495845:
+        m["exit_enter"] = dict(calls=g(0x95a0), pid=g(0x95a8),
+                               status=g(0x95b0))
     if g(0x9540) == SYS and g(0x9570) == VALID:
         m["wait"] = dict(pid=g(0x9548), reaped=g(0x9550), status=g(0x9558),
                           error=g(0x9560), calls=g(0x9568))
@@ -217,6 +223,14 @@ def main() -> int:
         e = mm["wait"]
         print(f"  wait4: pid={e['pid']} reaped={e['reaped']} status={e['status']} "
               f"err={e['error']} calls={e['calls']}")
+    if "wait_enter" in mm:
+        e = mm["wait_enter"]
+        print(f"  wait4 entered: calls={e['calls']} pid={e['pid']} "
+              f"arg0={e['arg0']:#x}")
+    if "exit_enter" in mm:
+        e = mm["exit_enter"]
+        print(f"  exit entered: calls={e['calls']} pid={e['pid']} "
+              f"status={e['status']}")
     if mm.get("enter_slots"):
         print(f"  exec entries recorded: {mm['enter_count']}")
         for i, s in enumerate(mm["enter_slots"]):

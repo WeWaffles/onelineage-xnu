@@ -1,0 +1,40 @@
+--- a/bsd/dev/arm/systemcalls.c
++++ b/bsd/dev/arm/systemcalls.c
+@@ -186,6 +186,37 @@
+ #endif
+ 	pid = proc_pid(proc);
+ 
++	/*
++	 * m482: the two calls this boot is about, recorded where they are made.
++	 *
++	 * 0x9540 can only be written once wait4() returns, and hw/m481 ended with
++	 * pid 1 still inside it, so "was wait4 reached" had no answer.  These
++	 * records are written before the syscall is dispatched, so they say the
++	 * call happened even when it never comes back:
++	 *
++	 *   0x9580  wait4 entries    0x9588  caller pid   0x9590  arg0 ("WART")
++	 *   0x95a0  exit entries     0x95a8  caller pid   0x95b0  status ("EXIT")
++	 */
++	{
++		extern void sweet_early_write64(uint64_t, uint64_t);
++		static unsigned int sweet_wait_entered, sweet_exit_entered;
++
++		if (code == SYS_wait4) {
++			sweet_early_write64(0x9580,
++			    (uint64_t)++sweet_wait_entered);
++			sweet_early_write64(0x9588, (uint64_t)(uint32_t)pid);
++			sweet_early_write64(0x9590, uthread->uu_arg[0]);
++			sweet_early_write64(0x9598, 0x54524157ULL);
++		}
++		if (code == SYS_exit) {
++			sweet_early_write64(0x95a0,
++			    (uint64_t)++sweet_exit_entered);
++			sweet_early_write64(0x95a8, (uint64_t)(uint32_t)pid);
++			sweet_early_write64(0x95b0, uthread->uu_arg[0]);
++			sweet_early_write64(0x95b8, 0x54495845ULL);
++		}
++	}
++
+ #ifdef CONFIG_IOCOUNT_TRACE
+ 	uthread->uu_iocount = 0;
+ 	uthread->uu_vpindex = 0;
