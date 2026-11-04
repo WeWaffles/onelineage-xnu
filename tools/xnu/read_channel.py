@@ -307,6 +307,23 @@ def find_base(dump: bytes) -> int:
             return base
         start = off + 1
 
+    # A rotated dump need not keep u64 alignment. Validate the entry tag
+    # against a duplicated proof record rather than accepting printable text.
+    for match in __import__("re").finditer(b"XNUKRN1", dump + dump[:6]):
+        base = match.start()
+        if base >= n:
+            continue
+        if not valid(dump, base):
+            continue
+        ch = Channel(dump, base)
+        for slot in range(0, 14, 2):
+            left = struct.unpack("<8Q", ch.raw(0x600 + slot * 0x100, 64))
+            right = struct.unpack("<8Q", ch.raw(0x600 + (slot + 1) * 0x100, 64))
+            if (left[0] == right[0] == 0x313053534E584C4F and
+                    left[1] == slot and right[1] == slot + 1 and
+                    left[2:] == right[2:]):
+                return base
+
     # Fall back to the label slot and the bsd_init code for dumps that predate
     # the identity record.
     candidates: list[int] = []

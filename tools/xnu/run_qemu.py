@@ -26,6 +26,7 @@ Adapted from dipa-studio/ios-sweet tools/qemu-sweet.py (MIT).
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 import os
 import shutil
@@ -40,7 +41,10 @@ MAGIC = b"ONELXNU\0"
 PAGE = 0x4000
 BOOT_LINE_LENGTH = 608
 QEMU_PHYS_BASE = 0x42000000  # payload phys_base; must be 32MB-aligned for XNU bootstrap L2 block mapping
-QEMU_RAMDISK_BASE = 0x50000000  # physical address where the HFS+ ramdisk image is loaded
+# Physical address the ramdisk image is loaded at.  It is verified present in
+# guest RAM (0xfeedfacf at this address via the monitor), but md0 still pages in
+# zeros for it, so QEMU cannot yet reach EL0 -- see XNU_PROGRESS.md.
+QEMU_RAMDISK_BASE = 0x50000000
 FB_BASE = 0x9c000000   # sweet_early.c EARLY_FB
 FB_W = 1080
 FB_H = 2400
@@ -117,8 +121,30 @@ def check_qemu(cpu: str = "cortex-a76") -> bool:
     return True
 
 
+def llvm_nm() -> str | None:
+    """Locate llvm-nm.
+
+    Homebrew's llvm is often not on PATH even when installed, and Xcode always
+    ships one; searching both avoids a run that silently loses text decoding.
+    """
+    found = shutil.which("llvm-nm")
+    if found:
+        return found
+    try:
+        found = subprocess.check_output(["xcrun", "-f", "llvm-nm"],
+                                        text=True, stderr=subprocess.DEVNULL).strip()
+        if found and os.path.isfile(found):
+            return found
+    except Exception:
+        pass
+    for toolchain in sorted(glob.glob(
+            "/Applications/Xcode*.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/llvm-nm")):
+        return toolchain
+    return None
+
+
 def check_llvm_nm(kernel_path: str) -> bool:
-    if not shutil.which("llvm-nm"):
+    if not llvm_nm():
         print("[!] llvm-nm not found (required for --kernel text decoding)", file=sys.stderr)
         print("    macOS: brew install llvm", file=sys.stderr)
         return False
@@ -126,6 +152,13 @@ def check_llvm_nm(kernel_path: str) -> bool:
         print(f"[!] kernel not found: {kernel_path}", file=sys.stderr)
         return False
     return True
+
+
+# `msr OSLAR_EL1, xzr` followed by `msr DAIFSet, #0xf` — the debug unlock at
+# the top of _start_first_cpu.  Unlikely to occur by accident; used to find the
+# single instruction QEMU cannot execute.
+OSLAR_UNLOCK = struct.pack("<II", 0xD510109F, 0xD5034FDF)
+AARCH64_NOP = struct.pack("<I", 0xD503201F)
 
 
 def build_image(payload: bytes) -> tuple[int, bytes, int, int]:
@@ -162,6 +195,24 @@ def build_image(payload: bytes) -> tuple[int, bytes, int, int]:
     ba += cmdline + b"\0" * 4 + struct.pack("<QQ", 0, mem_size)
     assert len(ba) == 736
     img[ba_pa - phys_base : ba_pa - phys_base + len(ba)] = ba
+
+    #
+    # QEMU has no debug registers.
+    #
+    # _start_first_cpu opens with `msr OSLAR_EL1, xzr` (unlock the OS lock for
+    # an external debugger).  TCG does not model that register, so the store
+    # raises an undefined-instruction exception *before* VBAR_EL1 is set, and
+    # the guest vectors through 0x200 forever.  The unlock only affects an
+    # attached debugger, so neutralise that single instruction in the QEMU
+    # image; the payload and the device kernel are untouched.
+    patched = 0
+    off = img.find(OSLAR_UNLOCK)
+    while off >= 0:
+        img[off : off + 4] = AARCH64_NOP
+        patched += 1
+        off = img.find(OSLAR_UNLOCK, off + 4)
+    if patched:
+        print(f"[*] neutralised {patched} OSLAR_EL1 unlock for QEMU", flush=True)
 
     return phys_base, bytes(img), ba_pa, entry_va + delta
 
@@ -308,7 +359,7 @@ def main() -> int:
 
     if args.check_env:
         ok = check_qemu(args.cpu)
-        if shutil.which("llvm-nm"):
+        if llvm_nm():
             print("[*] llvm-nm found", file=sys.stderr)
         else:
             print("[!] llvm-nm not found (optional, needed for --kernel)", file=sys.stderr)
@@ -326,7 +377,7 @@ def main() -> int:
     payload = open(args.payload, "rb").read()
     font = None
     if args.kernel:
-        symbols = subprocess.check_output(["llvm-nm", "--defined-only", args.kernel], text=True)
+        symbols = subprocess.check_output([llvm_nm(), "--defined-only", args.kernel], text=True)
         fonts = [
             int(line.split()[0], 16)
             for line in symbols.splitlines()

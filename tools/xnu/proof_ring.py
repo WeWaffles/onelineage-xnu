@@ -11,7 +11,7 @@ because the store is a rotated circular buffer.
 
 Layout (sweet_early.c): SWEET_PROOF_BASE, 14 slots of 0x100 bytes.
     0..11    rotation: 0xd6, 0xd7, 0xec, 0xe2, 0xad - two copies each
-    12, 13   0xae watchdog-pet probe, outside the rotation
+    12, 13   0xad syscall heartbeat, outside the rotation (m321 and later)
 
 0xad carries its own clock: milliseconds = ticks * 1000 / cntfrq.
 """
@@ -52,7 +52,7 @@ def main(argv):
         if ok and stage == 0xad and c:
             extra = f"  -> {a} syscalls, {b * 1000 / c:.0f} ms, {d} pets"
         if ok and stage == 0xae:
-            extra = f"  -> wrote {b:#x}, read back {c:#x} ({'LANDED' if b == c else 'DID NOT LAND'})"
+            extra = f"  -> wrote {b:#x}, read back {c:#x}; functional pet not established by readback"
         print(f"  slot {i:2} {'ok' if ok else '--':2} seq={seq:8} stage={stage:#5x} "
               f"a={a:#x} b={b:#x} c={c:#x} d={d:#x}  {STAGES.get(stage,'?')}{extra}")
     return 0

@@ -143,7 +143,7 @@ def main() -> int:
     parser.add_argument("output", type=Path)
     parser.add_argument("--mode", choices=("qemu", "phone"), default="qemu")
     parser.add_argument("--ramdisk", type=Path, default=None,
-                        help="Raw HFS+ ramdisk image to embed at QEMU_RAMDISK_BASE (0x50000000)")
+                        help=f"Raw HFS+ ramdisk image to embed at QEMU_RAMDISK_BASE ({QEMU_RAMDISK_BASE:#x})")
     args = parser.parse_args()
     manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
     validate_manifest(manifest)
