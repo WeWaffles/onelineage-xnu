@@ -4023,7 +4023,7 @@ diff -ruN a/osfmk/arm64/proc_reg.h build/xnu-src/source/osfmk/arm64/proc_reg.h
  #endif /* __ARM_16K_PG__ */
 diff -ruN a/osfmk/arm64/sleh.c build/xnu-src/source/osfmk/arm64/sleh.c
 --- a/osfmk/arm64/sleh.c	2026-11-03 17:51:44
-+++ build/xnu-src/source/osfmk/arm64/sleh.c	2026-11-03 16:55:12
++++ build/xnu-src/source/osfmk/arm64/sleh.c	2026-11-03 19:50:02
 @@ -26,6 +26,7 @@
   * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
   */
@@ -4059,11 +4059,13 @@ diff -ruN a/osfmk/arm64/sleh.c build/xnu-src/source/osfmk/arm64/sleh.c
  	 * Use KERNEL_DEBUG_CONSTANT_IST here to avoid producing tracepoints
  	 * that would disclose the behavior of PT_DENY_ATTACH processes.
  	 */
-@@ -1861,9 +1882,26 @@
+@@ -1861,9 +1882,31 @@
  	 * sweet: TrustZone owns GIC Group 0, so the timer and IPIs that other
  	 * ARM64 targets take as FIQs arrive here as Group 1 IRQs.
  	 */
 +#include <arm64/sweet_early.h>
++
++extern int sweet_exit_tid;
  	uint64_t iar = __builtin_arm_rsr64("ICC_IAR1_EL1");
  	uint32_t intid = (uint32_t)(iar & 0xFFFFFF);
  
@@ -4078,7 +4080,10 @@ diff -ruN a/osfmk/arm64/sleh.c build/xnu-src/source/osfmk/arm64/sleh.c
 +	sweet_irq_count++;
 +	if ((sweet_irq_count & 0x3ff) == 0) {
 +		/* 0xc3: interrupts are still being taken (a = count) */
-+		sweet_early_evidence(0xc3, (uint64_t)sweet_irq_count, 0, 0, 0);
++		/* hw/m395b: this fills the 16-slot ring while the exit thread is stopped. */
++		if (sweet_exit_tid == 0) {
++			sweet_early_evidence(0xc3, (uint64_t)sweet_irq_count, 0, 0, 0);
++		}
 +	}
 +	sweet_early_write64(0x17c0, sweet_irq_count);
 +	sweet_early_write64(0x17c8, (uint64_t)intid);
@@ -4086,7 +4091,7 @@ diff -ruN a/osfmk/arm64/sleh.c build/xnu-src/source/osfmk/arm64/sleh.c
  	if (intid >= 1020 && intid <= 1023) {
  		return; /* spurious */
  	}
-@@ -2123,6 +2161,10 @@
+@@ -2123,6 +2166,10 @@
  
  	sp = get_saved_state_sp(&context->ss);
  	kernel_stack_bottom = round_page(thread->machine.kstackptr) - KERNEL_STACK_SIZE;
