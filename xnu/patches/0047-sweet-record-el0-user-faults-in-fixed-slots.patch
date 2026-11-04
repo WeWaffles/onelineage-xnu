@@ -1,0 +1,106 @@
+--- a/osfmk/arm64/sweet_early.c
++++ b/osfmk/arm64/sweet_early.c
+@@ -1120,8 +1120,49 @@
+ 	/* Keep the pet write-only: the reset register read semantics are unverified. */
+ }
+ 
++/*
++ * The EL0 fault record: eight fixed slots at +0x1b00, outside every ring.
++ *
++ * hw/m490 and hw/m491 both die with the child in EL0, and both preserved rings
++ * end in 0xc4/0xf3/0xfe snapshots: the 0xc1 record sleh.c writes for a user
++ * fault is real, but it lives in the rotating 16-entry ring at +0x2000, which
++ * the kernel's own later traffic overwrites before the capture.  Fault evidence
++ * therefore gets fixed slots that only a later fault can replace.
++ *
++ * +0x1b00 sits above the identity record (ends at +0x1a70) and below the
++ * evidence ring (+0x2000..+0x6000), inside the island at the channel base that
++ * the +0x1780 header shows surviving every capture.
++ *
++ *   0x00 magic, 0x08 seq, 0x10 pid, 0x18 esr, 0x20 far, 0x28 pc,
++ *   0x30 exception class, 0x38 cpsr
++ */
++#define SWEET_FAULT_BASE   0x1b00ULL
++#define SWEET_FAULT_SLOTS  8U
++#define SWEET_FAULT_STRIDE 0x40ULL
++#define SWEET_FAULT_MAGIC  0x313046554e584c4fULL /* "OLXNUF01" */
++
++static uint64_t sweet_fault_seq;
++
+ void
++sweet_early_user_fault(uint64_t pid, uint64_t esr, uint64_t far, uint64_t pc,
++    uint64_t exception_class, uint64_t cpsr)
++{
++	uint64_t seq = ++sweet_fault_seq;
++	uint64_t off = SWEET_FAULT_BASE +
++	    ((seq - 1) % SWEET_FAULT_SLOTS) * SWEET_FAULT_STRIDE;
+ 
++	sweet_early_write64(off + 0x00, SWEET_FAULT_MAGIC);
++	sweet_early_write64(off + 0x08, seq);
++	sweet_early_write64(off + 0x10, pid);
++	sweet_early_write64(off + 0x18, esr);
++	sweet_early_write64(off + 0x20, far);
++	sweet_early_write64(off + 0x28, pc);
++	sweet_early_write64(off + 0x30, exception_class);
++	sweet_early_write64(off + 0x38, cpsr);
++}
++
++void
++
+ sweet_early_evidence(uint64_t stage, uint64_t a, uint64_t b, uint64_t c,
+     uint64_t d)
+ {
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -26,6 +26,14 @@
+  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+  */
+ 
++/*
++ * m492: bsd/sys/proc.h cannot be included here (its typedefs collide with
++ * osfmk's in this translation unit), so the two BSD entry points the fault
++ * record needs are declared directly.
++ */
++struct proc;
++extern int proc_getpid(struct proc *);
++extern struct proc *current_proc(void);
+ #include <arm64/sweet_early.h>
+ #include <arm/caches_internal.h>
+ #include <arm/cpu_data.h>
+@@ -736,6 +744,13 @@
+ 			sweet_user_faults++;
+ 			sweet_early_evidence(0xc1, (uint64_t)esr, (uint64_t)far,
+ 			    get_saved_state_pc(state), (uint64_t)ESR_EC(esr));
++			/*
++			 * The same fault into fixed, non-rotating slots: the 0xc1 record
++			 * above is rotated out by later kernel traffic (hw/m490, m491).
++			 */
++			sweet_early_user_fault((uint64_t)proc_getpid(current_proc()),
++			    (uint64_t)esr, (uint64_t)far, get_saved_state_pc(state),
++			    (uint64_t)ESR_EC(esr), get_saved_state_cpsr(state));
+ 		}
+ 	}
+ 
+--- a/osfmk/arm64/sweet_early.h
++++ b/osfmk/arm64/sweet_early.h
+@@ -33,6 +33,8 @@
+ void sweet_early_write64(uint64_t off, uint64_t value);
+ void sweet_early_evidence(uint64_t stage, uint64_t a, uint64_t b, uint64_t c,
+     uint64_t d);
++void sweet_early_user_fault(uint64_t pid, uint64_t esr, uint64_t far,
++    uint64_t pc, uint64_t exception_class, uint64_t cpsr);
+ void sweet_trace_return(uint64_t pc, uint64_t sp, uint64_t cpsr);
+ void sweet_trace_phase(const char *s);
+ void sweet_trace_eret(uint64_t cpsr, uint64_t pc);
+@@ -75,6 +77,11 @@
+ 	(void)c;
+ 	(void)d;
+ }
++static inline void sweet_early_user_fault(uint64_t pid, uint64_t esr,
++    uint64_t far, uint64_t pc, uint64_t exception_class, uint64_t cpsr)
++{
++	(void)pid; (void)esr; (void)far; (void)pc; (void)exception_class; (void)cpsr;
++}
+ static inline void sweet_trace_return(uint64_t pc, uint64_t sp, uint64_t c)
+ {
+ 	(void)pc; (void)sp; (void)c;

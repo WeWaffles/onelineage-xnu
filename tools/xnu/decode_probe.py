@@ -20,6 +20,13 @@ PROOF = 0x313053534E584C4F
 SYS = 0x4F4C584E
 VALID = 0x44494C4156     # "VALID", written last into every mirror record
 EXC_MAGIC = 0x4F4C584E   # what sleh.c writes into every 0x9000/0x9200 record
+# The EL0 fault record: eight fixed slots at +0x1b00, written by
+# sweet_early_user_fault() from the is_user branch of sleh_synchronous, so a
+# child's ESR/FAR/PC survives the +0x2000 evidence ring rotating (hw/m490, m491).
+UF_MAGIC = 0x313046554E584C4F  # "OLXNUF01"
+UF_BASE = 0x1b00
+UF_SLOTS = 8
+UF_STRIDE = 0x40
 MIN_BYTES = 2_000_000
 WINDOW = 0x40000
 
@@ -73,7 +80,8 @@ def decode(d: bytes) -> dict | None:
     if off < 0 or base < 0:
         return None
     g = lambda o: struct.unpack_from("<Q", d, base + o)[0]
-    res = {"base": base, "exc": [], "exc2": [], "sys": [], "mmap": [], "slots": {}}
+    res = {"base": base, "exc": [], "exc2": [], "sys": [], "mmap": [], "slots": {},
+           "user_faults": []}
     for n in (12, 13, 14, 15, 17, 20, 21, 22, 23, 24, 25):
         b = 0x600 + n * 0x100
         if g(b) == PROOF:
@@ -173,6 +181,17 @@ def decode(d: bytes) -> dict | None:
     if g(0x9540) == SYS and g(0x9570) == VALID:
         m["wait"] = dict(pid=g(0x9548), reaped=g(0x9550), status=g(0x9558),
                           error=g(0x9560), calls=g(0x9568))
+    # Fixed EL0 fault slots.  The magic alone is not enough: the sequence number
+    # must also be non-zero, because a slot that never saw a fault still reads
+    # whatever log text the next boot left there.
+    faults = []
+    for k in range(UF_SLOTS):
+        b = UF_BASE + k * UF_STRIDE
+        if g(b) == UF_MAGIC and g(b + 8):
+            faults.append(dict(seq=g(b + 8), pid=g(b + 0x10), esr=g(b + 0x18),
+                               far=g(b + 0x20), pc=g(b + 0x28),
+                               ec=g(b + 0x30), cpsr=g(b + 0x38)))
+    res["user_faults"] = sorted(faults, key=lambda f: f["seq"])
     res["mirrors"] = m
     return res
 
@@ -276,6 +295,11 @@ def main() -> int:
     if "sleep_addr" in mm and "wake_addr" in mm:
         same = mm["sleep_addr"]["addr"] == mm["wake_addr"]["addr"]
         print(f"  sleep/wake addresses match: {same}")
+    for f in r["user_faults"]:
+        print(f"  user_fault seq={f['seq']} pid={f['pid']} esr={f['esr']:#x} "
+              f"ec={f['ec']:#x} far={f['far']:#x} pc={f['pc']:#x} cpsr={f['cpsr']:#x}")
+    if not r["user_faults"]:
+        print("  user_faults: none recorded (fixed slots +0x1b00 empty)")
     for e in mm.get("trace", []):
         print(f"  seq {e['seq']}: {e['event']:6} a={e['a']:#x} b={e['b']:#x}")
     if mm.get("enter_slots"):
