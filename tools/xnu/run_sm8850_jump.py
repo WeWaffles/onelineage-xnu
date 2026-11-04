@@ -303,11 +303,16 @@ def main() -> int:
          f"entry_off=0x{entry - pbase:x} image=0x{size:x} fb_off=0x{fb_off_ref:x} "
          f"gap=0x{fb_off_ref - size:x}")
 
-    # Skip leading all-zero pages so dd only moves real data.
+    #
+    # Stream from page 0, never from the first non-zero page.
+    #
+    # The old skip existed to avoid moving zeros, but it silently preserved
+    # stale RAM: m446's syscall ring came back byte-identical to m438's,
+    # including identical user pointers, because the ring lives in zero-fill
+    # pages that the dd never rewrote.  Evidence has to be per-run, so the
+    # whole image is streamed including its zeros.
+    #
     first_data = 0
-    while first_data * 4096 < size and not any(
-            blob[first_data * 4096:(first_data + 1) * 4096]):
-        first_data += 1
 
     note(f"base=0x{base:x} entry=0x{entry:x} ba=0x{ba:x} fb=0x{fb:x} "
          f"fb_size=0x{fb_size:x} size=0x{size:x} skip={first_data}")
