@@ -64,6 +64,9 @@ def main() -> int:
     ap.add_argument("outdir", type=pathlib.Path)
     ap.add_argument("--timeout", type=int, default=300)
     ap.add_argument("--interval", type=float, default=0.2)
+    ap.add_argument("--arm-file", type=pathlib.Path, default=None,
+                    help="only accept rings after this file contains --arm-text")
+    ap.add_argument("--arm-text", default="jumping")
     a = ap.parse_args()
     a.outdir.mkdir(parents=True, exist_ok=True)
     log = a.outdir / "watch.log"
@@ -71,11 +74,32 @@ def main() -> int:
     deadline = time.time() + a.timeout
     seen: set[str] = set()
     polls = saved = 0
+    baseline: str | None = None
+    armed = a.arm_file is None
     with log.open("w") as fh:
         while time.time() < deadline:
             d = read()
             polls += 1
-            if d and any(m in d for m in MARKS):
+            #
+            # Only trust a buffer produced by this run.  A watcher started
+            # before the jump will otherwise re-read the previous boot's ring
+            # (m447 did exactly that: it accepted the m446 buffer, same hash,
+            # because the harness had refused to jump).  So: ignore everything
+            # until the driver log says the jump was issued, and never accept a
+            # buffer identical to the pre-jump baseline.
+            #
+            if not armed and a.arm_file is not None:
+                try:
+                    if a.arm_text in a.arm_file.read_text(errors="replace"):
+                        armed = True
+                        fh.write("armed after jump was issued\n")
+                except OSError:
+                    pass
+            if d and baseline is None:
+                baseline = hashlib.sha256(d).hexdigest()[:12]
+                fh.write(f"baseline pre-jump ring {baseline} ({len(d)} bytes)\n")
+            if (armed and d and any(m in d for m in MARKS)
+                    and hashlib.sha256(d).hexdigest()[:12] != baseline):
                 h = hashlib.sha256(d).hexdigest()[:12]
                 if h not in seen:
                     seen.add(h)
