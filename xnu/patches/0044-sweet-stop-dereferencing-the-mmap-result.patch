@@ -1,0 +1,37 @@
+--- a/bsd/dev/arm/systemcalls.c
++++ b/bsd/dev/arm/systemcalls.c
+@@ -392,13 +392,29 @@
+ 			 */
+ 			if (code == SYS_mmap && error == 0) {
+ 				static int sweet_mmap_records;
+-				uint64_t addr = SWEET_RVAL64(uthread);
+-				uint64_t w = 0;
+ 
+-				if (sweet_mmap_records < 2 &&
+-				    copyin((user_addr_t)addr, &w, sizeof(w)) == 0) {
++				/*
++				 * m488: record the mapping, do not read it.
++				 *
++				 * hw/m487 took a kernel data abort at FAR 0x300000000,
++				 * DFSC 5 (translation fault), at __bcopyin+0x34
++				 * `ldrb w3, [x0], #1` -- this probe's copyin() from the VA
++				 * mmap had just returned.  Copying in an unbacked user VA
++				 * is a kernel-mode fault, and this port escalates that to a
++				 * panic instead of returning EFAULT, which ended the boot
++				 * before the child ran.  The kernel therefore stops
++				 * dereferencing a VA it merely handed out; userspace reads
++				 * its own mapping, where a fault is a user fault carrying
++				 * an esr/far record rather than a panic.
++				 *
++				 *   0xb9  a = returned address, b = SKIPPED marker,
++				 *         c = length, d = error
++				 */
++				if (sweet_mmap_records < 2) {
+ 					sweet_mmap_records++;
+-					sweet_early_evidence(0xb9, addr, w,
++					sweet_early_evidence(0xb9,
++					    SWEET_RVAL64(uthread),
++					    0xdead000000000000ULL,
+ 					    uthread->uu_arg[1], 0);
+ 				}
+ 			}

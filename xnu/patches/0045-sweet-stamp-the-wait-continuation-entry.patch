@@ -1,0 +1,24 @@
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -3025,6 +3025,21 @@
+ 	struct wait4_nocancel_args *uap;
+ 	int *retval;
+ 
++	/*
++	 * m488: the continuation ran.  A woken wait4 resumes here and leaves
++	 * through unix_syscall_return, which never reaches the post-syscall
++	 * record, so this stamp and the reap stamp are the only evidence that
++	 * the wake actually resumed the wait and that it reaped.
++	 */
++	{
++		extern void sweet_trace_record(uint64_t, uint64_t, uint64_t,
++		    uint64_t);
++
++		sweet_trace_record(0x9720,
++		    (uint64_t)(uint32_t)proc_getpid(current_proc()),
++		    (uint64_t)(uint32_t)result, 0x4e433157ULL);
++	}
++
+ 	if (result) {
+ 		return result;
+ 	}
