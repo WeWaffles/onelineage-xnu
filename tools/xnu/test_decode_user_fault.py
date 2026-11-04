@@ -49,20 +49,20 @@ def synthetic(rings: list[dict]) -> bytes:
 
 def main() -> int:
     print("layout")
-    check(dp.UF_BASE >= 0x1a70, f"fault base {dp.UF_BASE:#x} is above the identity record")
+    check(dp.UF_BASE >= 0x1400, f"fault base {dp.UF_BASE:#x} is in the measured-free gap")
     end = dp.UF_BASE + dp.UF_SLOTS * dp.UF_STRIDE
-    check(end <= 0x2000, f"fault slots end at {end:#x}, below the evidence ring at 0x2000")
+    check(end <= 0x1500, f"fault slots end at {end:#x}, below the surviving ring at 0x1500")
     check(dp.UF_BASE >= 0x600 + 14 * 0x100, "fault slots are clear of the proof slots")
     check(dp.UF_STRIDE % 8 == 0, "stride is a whole number of qwords")
 
     print("synthetic decode")
-    rec1 = dict(off=0x1b00, qwords=[dp.UF_MAGIC, 1, 2, 0x96000005,
+    rec1 = dict(off=dp.UF_BASE, qwords=[dp.UF_MAGIC, 1, 2, 0x96000005,
                                     0x100004000, 0x100000408, 0x25, 0x80000000])
     # Second record: wraps to the next slot, with a higher sequence number.
-    rec2 = dict(off=0x1b40, qwords=[dp.UF_MAGIC, 2, 2, 0x9200000f,
+    rec2 = dict(off=dp.UF_BASE + dp.UF_STRIDE, qwords=[dp.UF_MAGIC, 2, 2, 0x9200000f,
                                     0x16b3c5000, 0x100000370, 0x24, 0x60000000])
     # Third slot: magic but no sequence, i.e. log text that happens to match.
-    rec3 = dict(off=0x1b80, qwords=[dp.UF_MAGIC, 0, 0, 0, 0, 0, 0, 0])
+    rec3 = dict(off=dp.UF_BASE + 2 * dp.UF_STRIDE, qwords=[dp.UF_MAGIC, 0, 0, 0, 0, 0, 0, 0])
     r = dp.decode(synthetic([rec1, rec2, rec3]))
     check(r is not None, "synthetic ring decodes")
     if r:
@@ -122,6 +122,18 @@ def main() -> int:
     check(2 in got and got[2]["pid"] == 2 and got[2]["ec"] == 0x25,
           "pid 2's fault survives pid 1's traffic")
     check(2 in got and got[2]["far"] == 0x100004000, "child far is preserved")
+    print("survives concurrent logging")
+    rec_a = dict(off=slot(2), qwords=[dp.UF_MAGIC, 9, 2, 0x96000045,
+                                      0x100008b80, 0x100000370, 0x26, 0x60000000])
+    buf = bytearray(synthetic([rec_a]))
+    for o in range(0x2000 + 0x1500, 0x2000 + 0x6000 - 8, 8):
+        buf[o:o+8] = struct.pack("<Q", 0x5f726f665f647461)
+    rl = dp.decode(bytes(buf))
+    got = rl["user_faults"][0] if rl and rl["user_faults"] else None
+    check(got is not None and got["pid"] == 2 and got["pc"] == 0x100000370,
+          "record survives text written above the slot page")
+    check(got is not None and got["far"] == 0x100008b80 and got["ec"] == 0x26,
+          "far and class survive the logging")
     print("RESULT=" + ("PASS" if not fails else f"FAIL({len(fails)})"))
     return 0 if not fails else 1
 

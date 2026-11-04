@@ -20,12 +20,12 @@ PROOF = 0x313053534E584C4F
 SYS = 0x4F4C584E
 VALID = 0x44494C4156     # "VALID", written last into every mirror record
 EXC_MAGIC = 0x4F4C584E   # what sleh.c writes into every 0x9000/0x9200 record
-# The EL0 fault record: eight fixed slots at +0x1b00, written by
+# The EL0 fault record: four fixed slots at +0x1400, written by
 # sweet_early_user_fault() from the is_user branch of sleh_synchronous, so a
 # child's ESR/FAR/PC survives the +0x2000 evidence ring rotating (hw/m490, m491).
 UF_MAGIC = 0x313046554E584C4F  # "OLXNUF01"
-UF_BASE = 0x1b00
-UF_SLOTS = 8
+UF_BASE = 0x1400
+UF_SLOTS = 4
 UF_STRIDE = 0x40
 MIN_BYTES = 2_000_000
 WINDOW = 0x40000
