@@ -60,8 +60,16 @@ def resolve_pc(pc: int, tab: list[tuple[int, str]]) -> tuple[str, int] | None:
     return None if best is None else (best[1], pc - best[0])
 
 
-def decode(d: bytes) -> dict:
-    base = d.find(AA) - 0x1780
+def decode(d: bytes) -> dict | None:
+    # A real ring always carries the marker at or after RING_OFFSET; a buffer
+    # where it appears earlier cannot be decoded with those offsets, and
+    # silently reading shifted fields is worse than refusing (m468 prep: a
+    # 7-byte slice assignment shrank a test buffer by one byte and produced a
+    # base of -1, which read 0x9000 out of misaligned bytes).
+    off = d.find(AA)
+    base = off - 0x1780
+    if off < 0 or base < 0:
+        return None
     g = lambda o: struct.unpack_from("<Q", d, base + o)[0]
     res = {"base": base, "exc": [], "sys": [], "mmap": [], "slots": {}}
     for n in (12, 13, 14, 15, 17, 20, 21, 22, 23, 24, 25):
@@ -110,6 +118,10 @@ def main() -> int:
     d = p.read_bytes()
     print(f"OUTCOME=FRESH_RING {p.name} sha256={hashlib.sha256(d).hexdigest()[:12]} bytes={len(d)}")
     r = decode(d)
+    if r is None:
+        print("OUTCOME=FRESH_RING_UNUSABLE (LE 0xAA13 sits before the ring offset; "
+              "refusing to decode shifted fields)")
+        return 0
     for n, v in sorted(r["slots"].items()):
         print(f"  slot[{n}] stage={v[0]:#x} a={v[1]:#x} b={v[2]:#x} c={v[3]:#x} d={v[4]:#x}")
     print(f"  exc counter: {r['exc_count']}")
