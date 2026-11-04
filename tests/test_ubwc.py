@@ -112,5 +112,15 @@ class OrderIsDiscriminated(unittest.TestCase):
                             "layout must depend on pitch")
 
 
+
+class MetadataIsExplicitlyBlocked(unittest.TestCase):
+    def test_meta_plane_refuses_to_guess(self):
+        # The pixel plane is testable; the metadata plane is not.  Making that a
+        # raised error keeps a future caller from shipping a surface the DPU would
+        # read as compressed garbage.
+        with self.assertRaises(ubwc.MetadataPlaneBlocked):
+            ubwc.meta_plane(1472 * 3120 * 4)
+
+
 if __name__ == "__main__":
     unittest.main()

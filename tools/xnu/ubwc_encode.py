@@ -174,6 +174,27 @@ def decode(tiled: bytes, width: int, height: int, cpp: int, pitch: int | None = 
     return bytes(out)
 
 
+class MetadataPlaneBlocked(NotImplementedError):
+    """Raised because the UBWC metadata plane layout is not publicly documented.
+
+    A UBWC surface is a pixel plane plus a metadata plane; the metadata byte per
+    block is what tells the decoder whether a block is uncompressed and how big a
+    compressed block is.  Mesa names the byte and its compat codes
+    (src/freedreno/common/freedreno_ubwc.h) but the meta-plane size, pitch and
+    field layout live in layout code that no readable public source provides, so
+    this module refuses to synthesise one.  Callers must treat a buffer produced
+    here as a pixel plane only: correct tiling, not a display-ready surface.
+    """
+
+
+def meta_plane(pixel_plane_bytes: int) -> bytes:
+    """Refuse to invent the metadata plane.  See MetadataPlaneBlocked."""
+    raise MetadataPlaneBlocked(
+        "UBWC metadata plane layout is undocumented publicly; "
+        f"refusing to guess a meta plane for {pixel_plane_bytes} pixel-plane bytes"
+    )
+
+
 def _self_test() -> int:
     import hashlib
     w, h, cpp = 64, 32, 4
