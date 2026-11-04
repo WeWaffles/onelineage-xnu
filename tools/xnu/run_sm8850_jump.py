@@ -125,22 +125,44 @@ def main() -> int:
         "dumpsys power | grep -E 'mWakefulness=|Display Power'")
     note(f"display state: {txt.strip().replace(chr(10), ' | ')}")
 
-    rc, txt = adb(
-        "insmod /data/local/tmp/olxnu/olxnu_payload2_mod_v21.ko "
-        "proc_name=olxnu_payload2 payload_size_mb=128 target_pa=0xAE0000000 "
-        "auto_base=1")
-    note(f"payload insmod rc={rc} {txt}")
-    time.sleep(1)
-    rc, info = adb("cat /proc/olxnu_payload2/info")
-    (out / "payload_info.txt").write_text(info + "\n")
+    #
+    # Allocate inside the proven window, not at a distant hint.
+    #
+    # The old hint target_pa=0xAE0000000 sat far outside the CMA area the
+    # working runs use, so the module fell through to alloc_contig_range and
+    # handed back addresses like 0xa76000000 / 0xa90000000 (cma=False), which the
+    # region check then refused - two attempts, no jump.  Ask for the proven base
+    # and retry the load in place (no reboot) until the CMA allocator answers.
+    #
+    info = ""
+    base = 0
+    for attempt in range(1, 5):
+        rc, txt = adb(
+            "insmod /data/local/tmp/olxnu/olxnu_payload2_mod_v21.ko "
+            f"proc_name=olxnu_payload2 payload_size_mb=64 "
+            f"target_pa=0x{EXPECTED_BASE:x} auto_base=1")
+        note(f"payload insmod attempt {attempt} rc={rc} {txt}")
+        time.sleep(1)
+        rc, info = adb("cat /proc/olxnu_payload2/info")
+        (out / "payload_info.txt").write_text(info + "\n")
+        m = re.search(r"^payload_pa=(0x[0-9a-f]+)", info, re.M)
+        if m:
+            base = int(m.group(1), 16)
+        ok = (m and "alloc_method=cma_alloc" in info
+              and REGION_LO <= base < REGION_HI
+              and not (base & ((2 << 20) - 1)))
+        note(f"attempt {attempt}: base=0x{base:x} cma={'alloc_method=cma_alloc' in info} usable={bool(ok)}")
+        if ok:
+            break
+        _, dmesg = adb("dmesg | tail -6")
+        note(f"attempt {attempt} dmesg tail: {dmesg[-300:]}")
+        adb("rmmod olxnu_payload2_mod_v21")
+        time.sleep(1)
     note("payload info:\n" + info)
-
-    m = re.search(r"^payload_pa=(0x[0-9a-f]+)", info, re.M)
-    if not m:
+    if not base:
         note("no payload_pa")
         (out / "driver.log").write_text("\n".join(log) + "\n")
         return 1
-    base = int(m.group(1), 16)
 
     #
     # Alignment is the precondition, not the exact address.  Every run whose
