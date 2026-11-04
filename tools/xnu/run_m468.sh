@@ -42,22 +42,37 @@ sleep 2
 
 echo "[3/5] one jump attempt (bounded ${HARNESS_TIMEOUT}s)"
 python3 - "$LOG" "$OUT" "$HARNESS_TIMEOUT" <<'PY'
-import importlib.util, subprocess, sys
+import importlib.util, os, signal, subprocess, sys
 log, out, h_t = sys.argv[1], sys.argv[2], float(sys.argv[3])
 spec = importlib.util.spec_from_file_location("rj", "tools/xnu/run_sm8850_jump.py")
 rj = importlib.util.module_from_spec(spec); spec.loader.exec_module(rj)
-try:
-    rj.adb("rmmod olxnu_payload2_mod_v21", timeout=20)
-    with open(log, "w") as f:
-        subprocess.run([sys.executable, "tools/xnu/run_sm8850_jump.py", out,
-                        "--module", "olxnu_jump2_mod_v21.ko"],
-                       stdout=f, stderr=subprocess.STDOUT, timeout=h_t)
-except subprocess.TimeoutExpired:
-    print("harness timed out")
+rj.adb("rmmod olxnu_payload2_mod_v21", timeout=20)
+with open(log, "w") as f:
+    # Own session: on timeout, kill the whole group.  Killing only the harness
+    # leaves its adb children polling the device while capture is reading the
+    # ring -- the contention that hung m468 at 95 s.
+    p = subprocess.Popen([sys.executable, "tools/xnu/run_sm8850_jump.py", out,
+                          "--module", "olxnu_jump2_mod_v21.ko"],
+                         stdout=f, stderr=subprocess.STDOUT,
+                         start_new_session=True)
+    try:
+        p.wait(timeout=h_t)
+    except subprocess.TimeoutExpired:
+        os.killpg(p.pid, signal.SIGKILL)
+        p.wait()
+        print("harness timed out; process group killed")
 PY
 
 echo "[4/5] wait for capture"
-wait $CP; echo "capture_rc=$?"
+if grep -q "jumping" "$LOG" 2>/dev/null; then
+  wait $CP; echo "capture_rc=$?"
+else
+  # No jump line means no ring can be evidence; do not sit out the whole
+  # capture window waiting for a buffer that cannot be attributed to a jump.
+  kill "$CP" 2>/dev/null
+  wait "$CP" 2>/dev/null
+  echo "capture stopped early: no jump line was written"
+fi
 
 echo "[5/5] classify and decode"
 python3 tools/xnu/decode_probe.py --ring-dir "$OUT" --jump-log "$LOG" --capture-log "$CAP"
