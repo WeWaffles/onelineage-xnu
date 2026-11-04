@@ -72,7 +72,14 @@ def main() -> int:
             time.sleep(a.interval)
             continue
         if not delayed_done:
-            time.sleep(a.post_jump_delay)
+            # m493: waiting the full 25 s was longer than the reset itself, so
+            # the first read returned the *next* Android boot's kernel log (the
+            # saved buffer began mid-line "1625] dm-verity-debug ...").  The
+            # payload's channel is only in RAM while the jump is failing or
+            # running, so start sampling early and keep the caller's value as a
+            # cap.  Everything else here - baseline hash, full-size floor,
+            # changed-buffer gate, atomic save, deadline - is unchanged.
+            time.sleep(min(a.post_jump_delay, 8.0))
             delayed_done = True
             continue
         d = read_ring()

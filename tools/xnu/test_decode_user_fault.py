@@ -90,6 +90,19 @@ def main() -> int:
             check(got["user_faults"] == expected,
                   f"{p[0].name}: user_faults == {expected}, got {got['user_faults']}")
 
+    print("ec filter contract")
+    svc = 0x56000080
+    abort = 0x96000005
+    check(((svc >> 26) & 0x3F) == 0x15, "SVC ESR decodes to EC 0x15")
+    check(((abort >> 26) & 0x3F) == 0x25, "data abort ESR decodes to EC 0x25")
+    check(((abort >> 26) & 0x3F) != 0x15, "filter EC != 0x15 keeps an abort")
+    check(((svc >> 26) & 0x3F) == 0x15, "filter EC != 0x15 drops m492's SVCs")
+    rec = dict(off=0x1b00, qwords=[dp.UF_MAGIC, 1, 2, abort, 0x100004000,
+                                   0x100000408, 0x25, 0x80000000])
+    r2 = dp.decode(synthetic([rec]))
+    got = r2["user_faults"][0] if r2 and r2["user_faults"] else None
+    check(got is not None and got["ec"] != 0x15 and got["pc"] == 0x100000408,
+          "an abort record survives the filter path and decodes with its pc")
     print("RESULT=" + ("PASS" if not fails else f"FAIL({len(fails)})"))
     return 0 if not fails else 1
 
