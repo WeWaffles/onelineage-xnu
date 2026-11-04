@@ -348,7 +348,7 @@ _RAW_CODE = [
     # through into its own loop while the parent branches away.
     #
     ("cbz", 1, "loop"),                                     # x1 == 0 -> parent
-    "kid", ("movn", 16, 26), ("svc",), ("b", "kid"),        # 27 thread_self (child)
+    "kid", ("b", "kid"),                                    # child: spin, no syscall
     "loop", ("movn", 16, 27), ("svc",), ("b", "loop"),      # 28 task_self (parent)
 
 ]
