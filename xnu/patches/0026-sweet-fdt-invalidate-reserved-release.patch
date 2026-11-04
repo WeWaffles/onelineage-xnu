@@ -1,0 +1,26 @@
+--- a/bsd/kern/kern_descrip.c
++++ b/bsd/kern/kern_descrip.c
+@@ -1014,13 +1014,22 @@
+ 
+ 	/* close file descriptors */
+ 	if (fdp->fd_nfiles > 0 && fdp->fd_ofiles) {
+ 		for (int i = fdp->fd_afterlast; i-- > 0;) {
+ 			if ((fp = fdp->fd_ofiles[i]) != NULL) {
+ 				if (fdp->fd_ofileflags[i] & UF_RESERVED) {
+-					panic("fdfree: found fp with UF_RESERVED");
++					/*
++					 * m469: an operation installed this fileproc
++					 * but was torn down before it released its
++					 * reservation.  Every thread in the process is
++					 * gone by the time the table is invalidated, so
++					 * release the reservation and fall through to
++					 * the normal close instead of panicking and
++					 * leaving the descriptor in flux.
++					 */
++					fdp->fd_ofileflags[i] &= ~(UF_RESERVED | UF_RESVWAIT);
+ 				}
+ 				fp_close_and_unlock(p, i, fp, 0);
+ 				proc_fdlock(p);
+ 			}
+ 		}
+ 	}
