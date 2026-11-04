@@ -7662,6 +7662,60 @@ diff -ruN a/osfmk/kern/task.c build/xnu-src/source/osfmk/kern/task.c
  	thread_t                        thread, self;
  	task_t                          self_task;
  	boolean_t                       interrupt_save;
+diff -ruN a/osfmk/kern/thread.c build/xnu-src/source/osfmk/kern/thread.c
+--- a/osfmk/kern/thread.c	2023-08-13 22:06:07
++++ build/xnu-src/source/osfmk/kern/thread.c	2026-11-03 19:23:36
+@@ -622,6 +622,16 @@
+ 		subcode = proc_encode_exit_exception_code(bsd_info);
+ 		proc_exit(bsd_info);
+ 		bsd_info = NULL;
++	{
++		extern void sweet_early_evidence(uint64_t, uint64_t, uint64_t,
++		    uint64_t, uint64_t);
++		static int sweet_ea_records;
++		if (sweet_ea_records < 4) {
++			sweet_ea_records++;
++			sweet_early_evidence(0xea, (uint64_t)current_thread()->thread_id,
++			    0, 0, 0);
++		}
++	}
+ 		/*
+ 		 * if there is crash info in task
+ 		 * then do the deliver action since this is
+@@ -645,6 +655,16 @@
+ 		task_unlock(task);
+ 	}
+ 
++	{
++		extern void sweet_early_evidence(uint64_t, uint64_t, uint64_t,
++		    uint64_t, uint64_t);
++		static int sweet_eb_records;
++		if (sweet_eb_records < 4) {
++			sweet_eb_records++;
++			sweet_early_evidence(0xeb, (uint64_t)current_thread()->thread_id,
++			    0, 0, 0);
++		}
++	}
+ 	s = splsched();
+ 	thread_lock(thread);
+ 
+@@ -744,6 +764,16 @@
+ 
+ 	thread_block((thread_continue_t)thread_terminate_continue);
+ 	/*NOTREACHED*/
++	{
++		extern void sweet_early_evidence(uint64_t, uint64_t, uint64_t,
++		    uint64_t, uint64_t);
++		static int sweet_ec_records;
++		if (sweet_ec_records < 4) {
++			sweet_ec_records++;
++			sweet_early_evidence(0xec, (uint64_t)current_thread()->thread_id,
++			    0, 0, 0);
++		}
++	}
+ }
+ 
+ static bool
 diff -ruN a/osfmk/kern/thread_act.c build/xnu-src/source/osfmk/kern/thread_act.c
 --- a/osfmk/kern/thread_act.c	2023-08-13 22:06:07
 +++ build/xnu-src/source/osfmk/kern/thread_act.c	2026-11-03 18:15:50

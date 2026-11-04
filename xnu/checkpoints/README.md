@@ -55,6 +55,9 @@ The recorded tags, in the order they were added:
 | 0xe7 | `bsd/kern/kern_exit.c` | `exit_with_reason` resumed after `proc_exit` returned |
 | 0xe8 | `bsd/kern/kern_exit.c` | just before `thread_terminate(self)` |
 | 0xe9 | `bsd/kern/kern_exit.c` | just before `thread_exception_return()` |
+| 0xea | `osfmk/kern/thread.c` | `thread_terminate_self` resumed after `proc_exit` returned |
+| 0xeb | `osfmk/kern/thread.c` | before `splsched()` after the corpse/task bookkeeping |
+| 0xec | `osfmk/kern/thread.c` | just before `thread_exception_return()` in `thread_terminate_self` |
 
 **A note on 0xd9–0xdb.** These were listed here before they existed in the
 kernel: the insert used an anchor that no longer matched, the patch script
