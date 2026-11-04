@@ -1,0 +1,86 @@
+--- a/bsd/dev/arm/systemcalls.c
++++ b/bsd/dev/arm/systemcalls.c
+@@ -384,12 +384,50 @@
+ 			 */
+ 			if (code == SYS_fork && error == 0) {
+ 				sweet_early_evidence(0xba, SWEET_RVAL64(uthread),
+ 				    (uint64_t)(uint32_t)pid, 0, 0);
+ 				sweet_child_pid = (int)SWEET_RVAL64(uthread);
+ 				sweet_fork_seen = 1;
++			}
++			/*
++			 * m472: the child's write, and what it was meant to say.
++			 *
++			 *   0xbc  a = pid, b = fd | length << 32, c = result, d = error
++			 *   0xbd  a = first 8 bytes at the buffer, b = 1 when they equal
++			 *         "XNU_EL0\n", c = pid, d = length
++			 *
++			 * The buffer is user memory, so the bytes come through copyin(),
++			 * i.e. copy_validate() plus _bcopyin() and its recovery table.  A
++			 * bad pointer returns EFAULT and the record is skipped; nothing is
++			 * faulted around and nothing is suppressed.
++			 */
++			if (code == SYS_write) {
++				static int sweet_write_records;
++				static int sweet_write_bytes;
++
++				if (sweet_write_records < 4) {
++					sweet_write_records++;
++					sweet_early_evidence(0xbc,
++					    (uint64_t)(uint32_t)pid,
++					    (uint64_t)(uint32_t)uthread->uu_arg[0] |
++					    ((uint64_t)(uint32_t)uthread->uu_arg[2] << 32),
++					    SWEET_RVAL64(uthread),
++					    (uint64_t)(uint32_t)error);
++				}
++				if (sweet_write_bytes < 4) {
++					uint64_t w = 0;
++
++					if (copyin((user_addr_t)uthread->uu_arg[1], &w,
++					    sizeof(w)) == 0) {
++						sweet_write_bytes++;
++						sweet_early_evidence(0xbd, w,
++						    (w == 0x0a304c455f554e58ULL) ? 1 : 0,
++						    (uint64_t)(uint32_t)pid,
++						    uthread->uu_arg[2]);
++					}
++				}
+ 			}
+ 			/*
+ 			 * Whether the child is alive, asked of the process table.
+ 			 *
+ 			 * hw/m360 raised the 0xa6 cap to 12 and the parent's getpid
+ 			 * loop filled five records, all with result 1: pid 2 never
+--- a/bsd/kern/kern_fork.c
++++ b/bsd/kern/kern_fork.c
+@@ -618,12 +618,30 @@
+ 			child_proc->p_listflag |= P_LIST_DEADPARENT;
+ 			proc_list_unlock();
+ 		}
+ 
+ 		/* "Return" to the child */
+ 		task_clear_return_wait(get_threadtask(child_thread), TCRW_CLEAR_ALL_WAIT);
++		{
++			/*
++			 * m472: the child side of the fork, which no syscall record can
++			 * show because the child never enters unix_syscall.
++			 *
++			 *   0xbe  a = child pid, b = parent pid, c = child's return (0), d = 0
++			 */
++			static int sweet_fork_records;
++			extern void sweet_early_evidence(uint64_t, uint64_t, uint64_t,
++			    uint64_t, uint64_t);
++
++			if (sweet_fork_records < 8) {
++				sweet_fork_records++;
++				sweet_early_evidence(0xbe,
++				    (uint64_t)(uint32_t)proc_getpid(child_proc),
++				    (uint64_t)(uint32_t)proc_getpid(parent_proc), 0, 0);
++			}
++		}
+ 
+ 		/* drop the extra references we got during the creation */
+ 		task_deallocate(child_task);
+ 		thread_deallocate(child_thread);
+ 	}
+ 
