@@ -32,6 +32,22 @@ The recorded tags, in the order they were added:
 | 0xcd | `osfmk/kern/priority.c` | quantum callback entered (thread ids) |
 | 0xce | `bsd/kern/kern_exit.c` | `exit(0)` reached BSD: pid, status |
 | 0xcf | `osfmk/kern/sched_prim.c` | thread blocking after fork: id, reason, continuation |
+| 0xd0 | `osfmk/kern/task.c` | `task_terminate` (not on the process-exit path) |
+| 0xd1 | `osfmk/kern/thread_act.c` | `thread_terminate` |
+| 0xd2 | `bsd/kern/kern_exit.c` | `proc_exit` entered |
+| 0xd3 | `bsd/kern/kern_exit.c` | exit branch: `p_lflag`, is this the exit thread |
+| 0xd4 | `bsd/kern/kern_exit.c` | `task_terminate_internal` returned |
+| 0xd5 | `bsd/kern/kern_exit.c` | past the branch and the signal drain |
+| 0xd6 | `osfmk/kern/task.c` | `task_terminate_internal` entered |
+| 0xd7 | `bsd/kern/kern_exit.c` | about to sleep on `proc_prepareexit_wait` |
+| 0xd8 | `bsd/kern/kern_exit.c` | about to drain in-flight signals |
+| 0xd9 | `bsd/kern/kern_exit.c` | `proc_refdrain` returned |
+| 0xda | `bsd/kern/kern_exit.c` | `fdt_invalidate` returned |
+| 0xdb | `bsd/kern/kern_exit.c` | `workq_exit` returned |
+
+`0xb6` (trap) is now recorded only after `sweet_fork_seen` and capped at 10, so
+post-fork trap records survive the 16-slot ring and can show the parent
+running again. Before the fork they were boot noise.
 
 Two measurement hazards are also fixed here. The ring holds 16 records and the
 console emits `0xc6` at character rate, so `sweet_early_evidence()` now keeps

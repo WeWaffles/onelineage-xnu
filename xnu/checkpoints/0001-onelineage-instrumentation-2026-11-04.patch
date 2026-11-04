@@ -815,7 +815,7 @@ diff -ruN a/bsd/kern/kern_exec.c build/xnu-src/source/bsd/kern/kern_exec.c
  	 * Prefault executable or dyld entry point.
 diff -ruN a/bsd/kern/kern_exit.c build/xnu-src/source/bsd/kern/kern_exit.c
 --- a/bsd/kern/kern_exit.c	2023-08-13 22:06:07
-+++ build/xnu-src/source/bsd/kern/kern_exit.c	2026-11-03 18:08:26
++++ build/xnu-src/source/bsd/kern/kern_exit.c	2026-11-03 18:19:50
 @@ -72,6 +72,7 @@
   * Version 2.0.
   */
@@ -844,6 +844,128 @@ diff -ruN a/bsd/kern/kern_exit.c build/xnu-src/source/bsd/kern/kern_exit.c
  	struct task *task = proc_task(p);
  	struct uthread *ut;
  	int error = 0;
+@@ -2085,6 +2099,18 @@
+ void
+ proc_exit(proc_t p)
+ {
++	/*
++	 *   0xd2  a = pid
++	 */
++	{
++		static int sweet_pe_records;
++
++		if (sweet_pe_records < 4) {
++			sweet_pe_records++;
++			sweet_early_evidence(0xd2, (uint64_t)proc_getpid(p), 0, 0, 0);
++		}
++	}
++
+ 	proc_t q;
+ 	proc_t pp;
+ 	struct task *task = proc_task(p);
+@@ -2100,6 +2126,20 @@
+ 
+ 	proc_lock(p);
+ 	proc_transstart(p, 1, 0);
++
++	/*
++	 * hw/m382: which proc_exit branch this exit takes.  b = this thread is exit_thread.
++	 *
++	 *   0xd3
++	 */
++	{
++		static int sweet_d3_records;
++
++		if (sweet_d3_records < 4) {
++			sweet_d3_records++;
++			sweet_early_evidence(0xd3, (uint64_t)p->p_lflag, (uint64_t)(p->exit_thread == current_thread()), 0, 0);
++		}
++	}
+ 	if (!(p->p_lflag & P_LEXIT)) {
+ 		/*
+ 		 * This can happen if a thread_terminate() occurs
+@@ -2110,11 +2150,39 @@
+ 		proc_unlock(p);
+ 		proc_prepareexit(p, 0, TRUE);
+ 		(void) task_terminate_internal(task);
++
++	/*
++	 * 0xd4: task_terminate_internal returned in proc_exit.
++	 *
++	 *   0xd4
++	 */
++	{
++		static int sweet_d4_records;
++
++		if (sweet_d4_records < 4) {
++			sweet_d4_records++;
++			sweet_early_evidence(0xd4, (uint64_t)task, 0, 0, 0);
++		}
++	}
+ 		proc_lock(p);
+ 	} else if (!(p->p_lflag & P_LTERM)) {
+ 		proc_transend(p, 1);
+ 		/* Jetsam is in middle of calling proc_prepareexit, wait for it */
+ 		p->p_lflag |= P_LTERM;
++
++	/*
++	 * 0xd7: about to sleep on proc_prepareexit_wait.
++	 *
++	 *   0xd7
++	 */
++	{
++		static int sweet_d7_records;
++
++		if (sweet_d7_records < 4) {
++			sweet_d7_records++;
++			sweet_early_evidence(0xd7, (uint64_t)p->exit_thread, (uint64_t)current_thread(), 0, 0);
++		}
++	}
+ 		msleep(&p->exit_thread, &p->p_mlock, PWAIT, "proc_prepareexit_wait", NULL);
+ 	} else {
+ 		proc_transend(p, 1);
+@@ -2128,6 +2196,20 @@
+ 	 * disappear on them.
+ 	 */
+ 	if ((p->p_lflag & P_LINSIGNAL) || (p->p_sigwaitcnt > 0)) {
++
++	/*
++	 * 0xd8: about to drain in-flight signals (proc_sigdrain).
++	 *
++	 *   0xd8
++	 */
++	{
++		static int sweet_d8_records;
++
++		if (sweet_d8_records < 4) {
++			sweet_d8_records++;
++			sweet_early_evidence(0xd8, (uint64_t)p->p_lflag, (uint64_t)p->p_sigwaitcnt, 0, 0);
++		}
++	}
+ 		p->p_sigwaitcnt++;
+ 		while ((p->p_lflag & P_LINSIGNAL) || (p->p_sigwaitcnt > 1)) {
+ 			msleep(&p->p_sigmask, &p->p_mlock, PWAIT, "proc_sigdrain", NULL);
+@@ -2137,6 +2219,20 @@
+ 
+ 	proc_unlock(p);
+ 	pid = proc_getpid(p);
++
++	/*
++	 * 0xd5: proc_exit is past the branch and the signal drain.
++	 *
++	 *   0xd5
++	 */
++	{
++		static int sweet_d5_records;
++
++		if (sweet_d5_records < 4) {
++			sweet_d5_records++;
++			sweet_early_evidence(0xd5, (uint64_t)pid, 0, 0, 0);
++		}
++	}
+ 	exitval = p->p_xstat;
+ 	KERNEL_DEBUG_CONSTANT_IST(KDEBUG_COMMON,
+ 	    BSDDBG_CODE(DBG_BSD_PROC, BSD_PROC_EXIT) | DBG_FUNC_START,
 diff -ruN a/bsd/kern/mach_loader.c build/xnu-src/source/bsd/kern/mach_loader.c
 --- a/bsd/kern/mach_loader.c	2023-08-13 22:06:07
 +++ build/xnu-src/source/bsd/kern/mach_loader.c	2026-11-01 20:01:33
@@ -4693,7 +4815,7 @@ diff -ruN a/osfmk/arm64/status.c build/xnu-src/source/osfmk/arm64/status.c
      int      pid)
 diff -ruN a/osfmk/arm64/sweet_early.c build/xnu-src/source/osfmk/arm64/sweet_early.c
 --- a/osfmk/arm64/sweet_early.c	2026-11-03 17:51:44
-+++ build/xnu-src/source/osfmk/arm64/sweet_early.c	2026-11-03 18:07:25
++++ build/xnu-src/source/osfmk/arm64/sweet_early.c	2026-11-03 18:23:38
 @@ -11,8 +11,12 @@
  #include <stdint.h>
  #include <kern/misc_protos.h>
@@ -5218,7 +5340,7 @@ diff -ruN a/osfmk/arm64/sweet_early.c build/xnu-src/source/osfmk/arm64/sweet_ear
  sweet_early_panic(const char *fmt, va_list *args)
  {
  	if (early_disabled || early_panicking || !early_fb_usable) {
-@@ -204,6 +648,639 @@
+@@ -204,6 +648,642 @@
  	early_fb = (volatile uint32_t *)(uintptr_t)base;
  	__asm__ volatile("dsb sy" ::: "memory");
  	sweet_early_mark(9, "kernel framebuffer VA live");
@@ -5715,7 +5837,10 @@ diff -ruN a/osfmk/arm64/sweet_early.c build/xnu-src/source/osfmk/arm64/sweet_ear
 +
 +	if (stage == 0xb6) {
 +		static int sweet_b6;
-+		if (sweet_b6 >= 6) {
++
++		/* Before the fork, trap records are boot noise; after it they are the
++		 * only evidence that the parent is running again (see hw/m382). */
++		if (!sweet_fork_seen || sweet_b6 >= 10) {
 +			return;
 +		}
 +		sweet_b6++;
@@ -7207,7 +7332,7 @@ diff -ruN a/osfmk/kern/startup.c build/xnu-src/source/osfmk/kern/startup.c
  
 diff -ruN a/osfmk/kern/task.c build/xnu-src/source/osfmk/kern/task.c
 --- a/osfmk/kern/task.c	2026-11-03 17:51:44
-+++ build/xnu-src/source/osfmk/kern/task.c	2026-11-03 16:10:01
++++ build/xnu-src/source/osfmk/kern/task.c	2026-11-03 18:19:50
 @@ -110,6 +110,7 @@
  #include <kern/mach_param.h>
  #include <kern/misc_protos.h>
@@ -7278,6 +7403,81 @@ diff -ruN a/osfmk/kern/task.c build/xnu-src/source/osfmk/kern/task.c
  	thread_bootstrap_return();
  }
  
+@@ -2342,6 +2377,23 @@
+ task_terminate(
+ 	task_t          task)
+ {
++	/*
++	 * hw/m381: the child's exit(0) reaches BSD (0xce) and then the machine
++	 * produces no further records.  These three records mark how far the
++	 * teardown gets: task, thread, and the BSD process exit that precedes them.
++	 *
++	 *   0xd0  a = t_returnwaitflags, b = task pointer
++	 */
++	{
++		static int sweet_tt_records;
++
++		if (sweet_tt_records < 4) {
++			sweet_tt_records++;
++			sweet_early_evidence(0xd0, (uint64_t)task->t_returnwaitflags,
++			    (uint64_t)(uintptr_t)task, 0, 0);
++		}
++	}
++
+ 	if (task == TASK_NULL) {
+ 		return KERN_INVALID_ARGUMENT;
+ 	}
+@@ -2832,6 +2884,19 @@
+ task_terminate_internal(
+ 	task_t                  task)
+ {
++	/*
++	 *  0xd6: task_terminate_internal entered.
++	 */
++	{
++		static int sweet_tti_records;
++
++		if (sweet_tti_records < 4) {
++			sweet_tti_records++;
++			sweet_early_evidence(0xd6, (uint64_t)task->t_returnwaitflags,
++			    (uint64_t)(uintptr_t)task, 0, 0);
++		}
++	}
++
+ 	thread_t                        thread, self;
+ 	task_t                          self_task;
+ 	boolean_t                       interrupt_save;
+diff -ruN a/osfmk/kern/thread_act.c build/xnu-src/source/osfmk/kern/thread_act.c
+--- a/osfmk/kern/thread_act.c	2023-08-13 22:06:07
++++ build/xnu-src/source/osfmk/kern/thread_act.c	2026-11-03 18:15:50
+@@ -51,6 +51,7 @@
+  */
+ 
+ #include <mach/mach_types.h>
++#include <arm64/sweet_early.h>
+ #include <mach/kern_return.h>
+ #include <mach/thread_act_server.h>
+ #include <mach/thread_act.h>
+@@ -251,6 +252,19 @@
+ thread_terminate(
+ 	thread_t                thread)
+ {
++	/*
++	 *   0xd1  a = thread id, b = thread state
++	 */
++	{
++		static int sweet_tht_records;
++
++		if (sweet_tht_records < 4) {
++			sweet_tht_records++;
++			sweet_early_evidence(0xd1, (uint64_t)thread->thread_id,
++			    (uint64_t)thread->state, 0, 0);
++		}
++	}
++
+ 	task_t task;
+ 
+ 	if (thread == THREAD_NULL) {
 diff -ruN a/osfmk/kern/timer_call.c build/xnu-src/source/osfmk/kern/timer_call.c
 --- a/osfmk/kern/timer_call.c	2023-08-13 22:06:07
 +++ build/xnu-src/source/osfmk/kern/timer_call.c	2026-11-03 17:54:49
