@@ -1,0 +1,34 @@
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -3055,6 +3055,15 @@
+ 	int status, error;
+ 	uthread_t uth;
+ 	struct _wait4_data *wait4_data;
++
++	/* m486: a wake resumes wait4 through here, not through unix_syscall. */
++	{
++		extern void sweet_trace_record(uint64_t, uint64_t, uint64_t,
++		    uint64_t);
++
++		sweet_trace_record(0x96c0, (uint64_t)(uint32_t)proc_getpid(q),
++		    0, 0x4e453457ULL);
++	}
+ 
+ 	AUDIT_ARG(pid, uap->pid);
+ 
+@@ -3114,6 +3123,15 @@
+ 				goto out;
+ 			}
+ #endif
++			/* m486: this is the SZOMB reap, reachable from the continuation. */
++			{
++				extern void sweet_trace_record(uint64_t, uint64_t,
++				    uint64_t, uint64_t);
++
++				sweet_trace_record(0x96f0,
++				    (uint64_t)(uint32_t)proc_getpid(q),
++				    (uint64_t)(uint32_t)retval[0], 0x50414552ULL);
++			}
+ 			retval[0] = proc_getpid(p);
+ 			if (uap->status) {
+ 				/* Legacy apps expect only 8 bits of status */
