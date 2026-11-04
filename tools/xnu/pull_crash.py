@@ -101,6 +101,19 @@ def main() -> int:
         tagged = b"XNUKRN1" in data
         if baseline and data == baseline:
             tagged = False   # still the boot we jumped from
+        #
+        # Keep every distinct dump that appears after the reset, with a hash.
+        # The first one after the device returns is the jumped boot; a later
+        # poll can be the *next* Android boot, whose dmesg no longer holds the
+        # module's markers.  hw/m402 kept only the largest, which was an
+        # Android log ("vendor.samsung") with no XNUJMP1 at all, so the one
+        # dump that could have said something was overwritten.
+        if len(data) > 1024 and data != baseline:
+            import hashlib
+            fp = args.outdir / f"dump_{attempt:02d}_{hashlib.sha256(data).hexdigest()[:8]}.txt"
+            if not fp.exists():
+                fp.write_bytes(data)
+                print(f"  kept {fp.name} ({len(data)} bytes)", flush=True)
         if tagged or len(data) > len(best):
             best = data
             print(f"  attempt {attempt}: {len(best)} bytes"
