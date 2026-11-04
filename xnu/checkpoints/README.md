@@ -52,6 +52,9 @@ The recorded tags, in the order they were added:
 | 0xe4 | `bsd/kern/kern_exit.c` | just before `proc_pgrp` (takes `proc_list_lock` and a pgrp lock) |
 | 0xe5 | `bsd/kern/kern_exit.c` | `proc_pgrp` returned |
 | 0xe6 | `bsd/kern/kern_exit.c` | end of the `proc_exit` body |
+| 0xe7 | `bsd/kern/kern_exit.c` | `exit_with_reason` resumed after `proc_exit` returned |
+| 0xe8 | `bsd/kern/kern_exit.c` | just before `thread_terminate(self)` |
+| 0xe9 | `bsd/kern/kern_exit.c` | just before `thread_exception_return()` |
 
 **A note on 0xd9–0xdb.** These were listed here before they existed in the
 kernel: the insert used an anchor that no longer matched, the patch script
