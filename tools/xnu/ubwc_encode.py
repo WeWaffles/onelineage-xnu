@@ -231,6 +231,31 @@ def meta_plane_geometry(width: int, height: int, cpp: int,
                         blocks_x)
 
 
+
+def zeroed_meta_plane(width: int, height: int, cpp: int,
+                      mipmapped: bool = False, r8g8: bool = False) -> bytes:
+    """An all-zero metadata plane of the correct geometry.
+
+    This encodes **no field values**, because their layout is not public.  It is
+    the state freedreno deliberately restores before use, quoting
+    src/gallium/drivers/freedreno/freedreno_resource.c:
+
+        /* Zero out the UBWC area on allocation. This fixes intermittent failures
+         * with UBWC, which I suspect are due to the HW having a hard time
+         * interpreting arbitrary values populating the flags buffer when the BO
+         * was recycled through the bo cache (instead of fresh allocations from
+         * the kernel, which are zeroed). sleep(1) in this spot didn't work
+         * around the issue, but any memset value seems to. */
+
+    So "zeroed" is a driver-backed convention for "no compression state", not a
+    specification: no source states that zero means "uncompressed" in so many
+    words, and turnip confirms the CPU never encodes metadata at all
+    (tu_image.cc: "We don't support compressing or decompressing on the CPU").
+    A buffer built from this is still not evidence that a pipe will accept it.
+    """
+    return bytes(meta_plane_geometry(width, height, cpp, mipmapped, r8g8).size)
+
+
 class MetadataPlaneBlocked(NotImplementedError):
     """Raised because the UBWC metadata plane layout is not publicly documented.
 

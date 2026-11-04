@@ -152,5 +152,44 @@ class MetadataGeometry(unittest.TestCase):
             ubwc.meta_plane(1472 * 3120 * 4)
 
 
+
+class ConsoleScreenAtPanelPitch(unittest.TestCase):
+    """The console's own raster shape, through the encoder, at the live pitch."""
+
+    def test_console_raster_round_trips_at_panel_pitch(self):
+        from tools.xnu import console_ubwc
+        width, rows = console_ubwc.PANEL_WIDTH, 10
+        height = rows * console_ubwc.CELL_H
+        src = console_ubwc.raster(width, height, console_ubwc.MARKER)
+        tiled = ubwc.encode(src, width, height, 4, pitch=console_ubwc.PANEL_PITCH)
+        self.assertEqual(len(tiled), console_ubwc.PANEL_PITCH * height)
+        self.assertEqual(ubwc.decode(tiled, width, height, 4, pitch=console_ubwc.PANEL_PITCH), src)
+
+    def test_console_raster_has_ink_so_a_blank_picture_cannot_pass(self):
+        from tools.xnu import console_ubwc
+        src = console_ubwc.raster(64, 16, "X")
+        self.assertEqual(len(src), 64 * 16 * 4)
+        pixels = [int.from_bytes(src[i:i + 4], "little") for i in range(0, len(src), 4)]
+        self.assertGreater(sum(1 for p in pixels if p == console_ubwc.FG), 0,
+                           "marker glyph must set foreground pixels")
+        self.assertGreater(sum(1 for p in pixels if p == console_ubwc.BG), 0)
+
+
+
+class ZeroedMetadataPlane(unittest.TestCase):
+    def test_size_matches_geometry_and_is_all_zero(self):
+        plane = ubwc.zeroed_meta_plane(1472, 3120, 4)
+        g = ubwc.meta_plane_geometry(1472, 3120, 4)
+        self.assertEqual(len(plane), g.size)
+        self.assertEqual(len(plane), 102400)
+        self.assertEqual(plane, bytes(len(plane)), "zeroed plane must contain no field values")
+
+    def test_encoding_fields_is_still_refused(self):
+        # Zeroing needs no layout knowledge; writing fields does, and that stays
+        # an explicit error rather than a guess.
+        with self.assertRaises(ubwc.MetadataPlaneBlocked):
+            ubwc.meta_plane(1024)
+
+
 if __name__ == "__main__":
     unittest.main()
