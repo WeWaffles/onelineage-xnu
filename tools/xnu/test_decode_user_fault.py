@@ -103,6 +103,25 @@ def main() -> int:
     got = r2["user_faults"][0] if r2 and r2["user_faults"] else None
     check(got is not None and got["ec"] != 0x15 and got["pc"] == 0x100000408,
           "an abort record survives the filter path and decodes with its pc")
+    print("per-process slot rule")
+    slots = dp.UF_SLOTS
+    slot = lambda pid: (pid % slots) * dp.UF_STRIDE + dp.UF_BASE
+    check(slot(1) != slot(2), "pid 1 and pid 2 occupy different slots")
+    check(slot(2) == dp.UF_BASE + 2 * dp.UF_STRIDE, "pid 2 maps to its own slot")
+    # pid 1 fills its slot with SVC traffic, then pid 2 faults: the child must
+    # still be present, which is exactly what m492 and m495 lost.
+    svc = dict(off=slot(1) - dp.UF_BASE,
+               qwords=[dp.UF_MAGIC, 1, 1, 0x56000080, 0x16fdffef0,
+                       0x100004008, 0x15, 0x0])
+    fault = dict(off=slot(2) - dp.UF_BASE,
+                 qwords=[dp.UF_MAGIC, 2, 2, 0x96000005, 0x100004000,
+                         0x100000408, 0x25, 0x80000000])
+    r3 = dp.decode(synthetic([svc, fault]))
+    got = {f["seq"]: f for f in (r3["user_faults"] if r3 else [])}
+    check(1 in got and got[1]["ec"] == 0x15, "pid 1's SVC is recorded in its slot")
+    check(2 in got and got[2]["pid"] == 2 and got[2]["ec"] == 0x25,
+          "pid 2's fault survives pid 1's traffic")
+    check(2 in got and got[2]["far"] == 0x100004000, "child far is preserved")
     print("RESULT=" + ("PASS" if not fails else f"FAIL({len(fails)})"))
     return 0 if not fails else 1
 

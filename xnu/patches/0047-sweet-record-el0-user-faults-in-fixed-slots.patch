@@ -1,9 +1,10 @@
 --- a/osfmk/arm64/sweet_early.c
 +++ b/osfmk/arm64/sweet_early.c
-@@ -1120,8 +1120,49 @@
+@@ -1119,9 +1119,58 @@
+ 
  	/* Keep the pet write-only: the reset register read semantics are unverified. */
  }
- 
++
 +/*
 + * The EL0 fault record: eight fixed slots at +0x1b00, outside every ring.
 + *
@@ -24,7 +25,7 @@
 +#define SWEET_FAULT_SLOTS  8U
 +#define SWEET_FAULT_STRIDE 0x40ULL
 +#define SWEET_FAULT_MAGIC  0x313046554e584c4fULL /* "OLXNUF01" */
-+
+ 
 +static uint64_t sweet_fault_seq;
 +
  void
@@ -32,8 +33,16 @@
 +    uint64_t exception_class, uint64_t cpsr)
 +{
 +	uint64_t seq = ++sweet_fault_seq;
++	/*
++	 * Slots are indexed by process, not by arrival.  hw/m492 and hw/m495 both
++	 * lost the child's fault because the harness's EL0 SVCs had filled all
++	 * eight records before it: the recorder was a first-come ring shared by
++	 * every process.  Indexing by pid means one process's traffic can never
++	 * consume another's slot; within a pid the newest fault replaces the
++	 * oldest, and the global sequence number keeps the ordering readable.
++	 */
 +	uint64_t off = SWEET_FAULT_BASE +
-+	    ((seq - 1) % SWEET_FAULT_SLOTS) * SWEET_FAULT_STRIDE;
++	    (pid % SWEET_FAULT_SLOTS) * SWEET_FAULT_STRIDE;
  
 +	sweet_early_write64(off + 0x00, SWEET_FAULT_MAGIC);
 +	sweet_early_write64(off + 0x08, seq);
