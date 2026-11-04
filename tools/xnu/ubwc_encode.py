@@ -43,6 +43,8 @@ Usage:
 """
 from __future__ import annotations
 
+from typing import NamedTuple
+
 BLOCK_BYTES = 256
 
 # get_block_size(): pixels per 256-byte block, keyed by bytes per pixel.
@@ -172,6 +174,61 @@ def decode(tiled: bytes, width: int, height: int, cpp: int, pitch: int | None = 
     for i, off in enumerate(offs):
         out[i * cpp:(i + 1) * cpp] = tiled[off:off + cpp]
     return bytes(out)
+
+
+
+# Metadata-plane geometry, from Mesa's layout code (read 2026-11-04):
+#   src/freedreno/fdl/fd6_layout.c
+#   https://git.userevolt.app/intel-hard/intel-hard-graphics/raw/branch/main/src/freedreno/fdl/fd6_layout.c
+#   src/freedreno/fdl/freedreno_layout.h
+#
+# fd6_layout.c computes, per mip level:
+#   ubwc_width0  = align(ceil(width  / block_width),  64)
+#   ubwc_height0 = align(ceil(height / block_height), 16)      # 64 when mipmapped
+#   meta_pitch   = fdl_ubwc_pitch() == align(ubwc_width0, 64)  # bytes per meta row
+#   meta_height  = align(ubwc_height0, 16 or 64)
+#   size0        = align(meta_pitch * meta_height, 4096)
+# and places the metadata plane before the pixel data in the same buffer.
+# One metadata unit exists per UBWC block, which is why the meta row width in
+# bytes equals the block count per pixel row.
+META_WIDTH_ALIGNMENT = 64
+META_HEIGHT_ALIGNMENT = 16
+META_HEIGHT_ALIGNMENT_MIPMAPPED = 64
+META_PLANE_ALIGNMENT = 4096
+
+
+class MetaGeometry(NamedTuple):
+    """Geometry of the UBWC metadata plane. Contents are still blocked."""
+
+    pitch: int          # bytes per metadata row
+    height: int         # metadata rows
+    size: int           # pitch * height, rounded up to 4096
+    blocks_per_row: int
+
+
+def _ceil_div(a: int, b: int) -> int:
+    return -(-a // b)
+
+
+def _align(v: int, a: int) -> int:
+    return (v + a - 1) // a * a
+
+
+def meta_plane_geometry(width: int, height: int, cpp: int,
+                        mipmapped: bool = False,
+                        r8g8: bool = False) -> MetaGeometry:
+    """Metadata-plane geometry from Mesa's fd6_layout.c (no byte encoding)."""
+    bw, bh = block_dims(cpp, r8g8)
+    blocks_x = _ceil_div(width, bw)
+    blocks_y = _ceil_div(height, bh)
+    ubwc_w0 = _align(blocks_x, META_WIDTH_ALIGNMENT)
+    h_align = META_HEIGHT_ALIGNMENT_MIPMAPPED if mipmapped else META_HEIGHT_ALIGNMENT
+    ubwc_h0 = _align(blocks_y, h_align)
+    pitch = _align(ubwc_w0, META_WIDTH_ALIGNMENT)
+    meta_height = _align(ubwc_h0, h_align)
+    return MetaGeometry(pitch, meta_height,
+                        _align(pitch * meta_height, META_PLANE_ALIGNMENT),
+                        blocks_x)
 
 
 class MetadataPlaneBlocked(NotImplementedError):

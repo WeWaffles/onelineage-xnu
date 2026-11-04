@@ -122,5 +122,35 @@ class MetadataIsExplicitlyBlocked(unittest.TestCase):
             ubwc.meta_plane(1472 * 3120 * 4)
 
 
+
+class MetadataGeometry(unittest.TestCase):
+    """Geometry is evidenced (fd6_layout.c); the byte encoding is not."""
+
+    def test_panel_geometry_numbers(self):
+        g = ubwc.meta_plane_geometry(1472, 3120, 4)
+        # blocks: ceil(1472/16)=92, ceil(3120/4)=780
+        self.assertEqual(g.blocks_per_row, 92)
+        # 92 -> align to 64 = 128 bytes of meta per row
+        self.assertEqual(g.pitch, 128)
+        # 780 -> align to 16 = 784 rows
+        self.assertEqual(g.height, 784)
+        # 128 * 784 = 100,352 -> align to 4096 = 102,400
+        self.assertEqual(g.size, 102400)
+        self.assertEqual(g.size % 4096, 0)
+
+    def test_pitch_is_block_count_rounded_to_64(self):
+        # 320 px / 16 = 20 blocks -> 64; 1080 px / 16 = 68 blocks -> 128
+        self.assertEqual(ubwc.meta_plane_geometry(320, 64, 4).pitch, 64)
+        self.assertEqual(ubwc.meta_plane_geometry(1080, 64, 4).pitch, 128)
+
+    def test_mipmapped_aligns_height_to_64(self):
+        self.assertEqual(ubwc.meta_plane_geometry(64, 64, 4).height, 16)
+        self.assertEqual(ubwc.meta_plane_geometry(64, 64, 4, mipmapped=True).height, 64)
+
+    def test_contents_still_blocked(self):
+        with self.assertRaises(ubwc.MetadataPlaneBlocked):
+            ubwc.meta_plane(1472 * 3120 * 4)
+
+
 if __name__ == "__main__":
     unittest.main()
