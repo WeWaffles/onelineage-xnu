@@ -1,0 +1,27 @@
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -2751,6 +2751,8 @@
+ 			    (uint64_t)(uint32_t)proc_getpid(pp));
+ 			sweet_early_write64(0x95f8, (uint64_t)(uint32_t)p->p_stat);
+ 			sweet_early_write64(0x95e0, 0x424d4f5aULL);
++			sweet_early_write64(0x9648, (uint64_t)(uintptr_t)pp);
++			sweet_early_write64(0x9640, 0x52444157ULL);
+ 		}
+ 		psignal(pp, SIGCHLD);
+ 
+@@ -3232,7 +3234,15 @@
+ 	wait4_data = &uth->uu_save.uus_wait4_data;
+ 	wait4_data->args = uap;
+ 	wait4_data->retval = retval;
++
++	/* m484: the address this waiter is about to sleep on. */
++	{
++		extern void sweet_early_write64(uint64_t, uint64_t);
+ 
++		sweet_early_write64(0x9628, (uint64_t)(uintptr_t)q);
++		sweet_early_write64(0x9630, (uint64_t)(uint32_t)proc_getpid(q));
++		sweet_early_write64(0x9620, 0x50454c53ULL);
++	}
+ 	thread_set_pending_block_hint(current_thread(), kThreadWaitOnProcess);
+ 	if ((error = msleep0((caddr_t)q, &proc_list_mlock, PWAIT | PCATCH | PDROP, "wait", 0, wait1continue))) {
+ 		return error;

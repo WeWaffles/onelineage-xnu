@@ -151,6 +151,10 @@ def decode(d: bytes) -> dict | None:
                            p_stat=g(0x95f8))
     if g(0x9600) == 0x454b4157:
         m["wake_done"] = dict(pid=g(0x9608), ppid=g(0x9610))
+    if g(0x9620) == 0x50454c53:
+        m["sleep_addr"] = dict(addr=g(0x9628), pid=g(0x9630))
+    if g(0x9640) == 0x52444157:
+        m["wake_addr"] = dict(addr=g(0x9648))
     if g(0x9540) == SYS and g(0x9570) == VALID:
         m["wait"] = dict(pid=g(0x9548), reaped=g(0x9550), status=g(0x9558),
                           error=g(0x9560), calls=g(0x9568))
@@ -248,6 +252,15 @@ def main() -> int:
     if "wake_done" in mm:
         e = mm["wake_done"]
         print(f"  wakeup returned: pid={e['pid']} ppid={e['ppid']}")
+    if "sleep_addr" in mm:
+        e = mm["sleep_addr"]
+        print(f"  wait4 slept on: {e['addr']:#x} (pid={e['pid']})")
+    if "wake_addr" in mm:
+        e = mm["wake_addr"]
+        print(f"  exit woke on:   {e['addr']:#x}")
+    if "sleep_addr" in mm and "wake_addr" in mm:
+        same = mm["sleep_addr"]["addr"] == mm["wake_addr"]["addr"]
+        print(f"  sleep/wake addresses match: {same}")
     if mm.get("enter_slots"):
         print(f"  exec entries recorded: {mm['enter_count']}")
         for i, s in enumerate(mm["enter_slots"]):
