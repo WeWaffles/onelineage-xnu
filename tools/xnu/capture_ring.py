@@ -55,6 +55,10 @@ def main() -> int:
     baseline = hashlib.sha256(base).hexdigest()
     print(f"baseline {baseline[:12]} bytes={len(base)}", flush=True)
 
+    # Full-size gate.  The ring does not shrink, so a buffer shorter than the
+    # pre-jump baseline is a truncated read, not evidence; --min-bytes (1 MB)
+    # alone would happily accept a half-read 2 MiB ring.
+    floor = max(a.min_bytes, len(base))
     deadline = time.time() + a.timeout
     seen: set[str] = set()
     reads = 0
@@ -75,7 +79,7 @@ def main() -> int:
         reads += 1
         # A device mid-reset answers with a truncated buffer (m464 saw 46 bytes)
         # and rc=0, which is not a ring; require a full-size read.
-        if d is None or len(d) < a.min_bytes:
+        if d is None or len(d) < floor:
             time.sleep(a.interval)
             continue
         h = hashlib.sha256(d).hexdigest()

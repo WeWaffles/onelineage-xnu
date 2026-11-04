@@ -18,7 +18,8 @@ import argparse, hashlib, pathlib, re, struct, subprocess, sys
 AA = (0xAA13).to_bytes(8, "little")
 PROOF = 0x313053534E584C4F
 SYS = 0x4F4C584E
-MIN_BYTES = 1_000_000
+EXC_MAGIC = 0x4F4C584E   # what sleh.c writes into every 0x9000/0x9200 record
+MIN_BYTES = 2_000_000
 WINDOW = 0x40000
 
 
@@ -71,17 +72,28 @@ def decode(d: bytes) -> dict | None:
     if off < 0 or base < 0:
         return None
     g = lambda o: struct.unpack_from("<Q", d, base + o)[0]
-    res = {"base": base, "exc": [], "sys": [], "mmap": [], "slots": {}}
+    res = {"base": base, "exc": [], "exc2": [], "sys": [], "mmap": [], "slots": {}}
     for n in (12, 13, 14, 15, 17, 20, 21, 22, 23, 24, 25):
         b = 0x600 + n * 0x100
         if g(b) == PROOF:
             res["slots"][n] = (g(b+0x18), g(b+0x20), g(b+0x28), g(b+0x30), g(b+0x38))
+    # Two writers share this layout shape but not the same slots any more:
+    # 0x9000 = legacy unfiltered record (all sync exceptions, no PC) and
+    # 0x9200 = m468 filtered record (EC != 0x15 only, carries PC).  Both write
+    # magic EXC_MAGIC; PROOF is accepted as well so rings from older builds
+    # still decode.
     for k in range(4):
         b = 0x9000 + k * 0x40
-        if g(b) == PROOF:
+        if g(b) in (EXC_MAGIC, PROOF):
             res["exc"].append(dict(esr=g(b+8), far=g(b+16), pc=g(b+24),
                                    user=g(b+32), ec=g(b+40), thread=g(b+48)))
     res["exc_count"] = g(0x9100)
+    for k in range(4):
+        b = 0x9200 + k * 0x40
+        if g(b) in (EXC_MAGIC, PROOF):
+            res["exc2"].append(dict(esr=g(b+8), far=g(b+16), pc=g(b+24),
+                                    user=g(b+32), ec=g(b+40), thread=g(b+48)))
+    res["exc2_count"] = g(0x9300)
     for k in range(8):
         b = 0x8400 + k * 0x38
         if g(b) == SYS:
@@ -127,23 +139,27 @@ def main() -> int:
     print(f"  exc counter: {r['exc_count']}")
     for i, e in enumerate(r["exc"]):
         print(f"  exc[{i}] esr={e['esr']:#x} ec={e['ec']} far={e['far']:#x} pc={e['pc']:#x} user={e['user']}")
+    print(f"  filtered exc counter (0x9300): {r['exc2_count']}")
+    for i, e in enumerate(r["exc2"]):
+        print(f"  exc2[{i}] esr={e['esr']:#x} ec={e['ec']} far={e['far']:#x} pc={e['pc']:#x} user={e['user']}")
     for i, s in enumerate(r["sys"]):
         print(f"  sys[{i}] code={s['code']} err={s['err']} pid={s['pid']} arg0={s['arg0']} afterlast={s['afterlast']}")
     for i, m in enumerate(r["mmap"]):
         print(f"  mmapret[{i}] errno={m['errno']} rval64={m['rval64']:#x} afterlast={m['afterlast']}")
 
-    if r["exc"]:
+    recs = [("exc", e) for e in r["exc"]] + [("exc2", e) for e in r["exc2"]]
+    if recs:
         if not a.kernel.exists():
             print("  symbol resolution: kernel image missing")
         else:
             tab = load_symbols(a.kernel)
-            for i, e in enumerate(r["exc"]):
+            for i, e in recs:
                 hit = resolve_pc(e["pc"], tab)
                 if hit:
-                    print(f"  resolved exc[{i}] pc={e['pc']:#x} -> {hit[0]}+{hit[1]:#x} "
+                    print(f"  resolved {i} pc={e['pc']:#x} -> {hit[0]}+{hit[1]:#x} "
                           f"(offset exact only if the kernel runs unslid)")
                 else:
-                    print(f"  resolved exc[{i}] pc={e['pc']:#x} -> no symbol within {WINDOW:#x}")
+                    print(f"  resolved {i} pc={e['pc']:#x} -> no symbol within {WINDOW:#x}")
     return 0
 
 
