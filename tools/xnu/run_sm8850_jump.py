@@ -126,21 +126,21 @@ def main() -> int:
     note(f"display state: {txt.strip().replace(chr(10), ' | ')}")
 
     #
-    # Allocate inside the proven window, not at a distant hint.
+    # Keep the hint the working runs used, and judge only the result.
     #
-    # The old hint target_pa=0xAE0000000 sat far outside the CMA area the
-    # working runs use, so the module fell through to alloc_contig_range and
-    # handed back addresses like 0xa76000000 / 0xa90000000 (cma=False), which the
-    # region check then refused - two attempts, no jump.  Ask for the proven base
-    # and retry the load in place (no reboot) until the CMA allocator answers.
+    # Pointing target_pa at the proven base (0xb7400000) with a 64 MB request
+    # made insmod fail with rc=255 and adb vanish immediately - the load itself
+    # faulted the device, twice (m449, m452).  The distant hint plus auto_base
+    # is the combination m446 ran with, so it is restored; the region and
+    # alloc_method checks below still decide whether the result is usable.
     #
     info = ""
     base = 0
     for attempt in range(1, 5):
         rc, txt = adb(
             "insmod /data/local/tmp/olxnu/olxnu_payload2_mod_v21.ko "
-            f"proc_name=olxnu_payload2 payload_size_mb=64 "
-            f"target_pa=0x{EXPECTED_BASE:x} auto_base=1")
+            f"proc_name=olxnu_payload2 payload_size_mb=128 "
+            f"target_pa=0xAE0000000 auto_base=1")
         note(f"payload insmod attempt {attempt} rc={rc} {txt}")
         time.sleep(1)
         rc, info = adb("cat /proc/olxnu_payload2/info")
