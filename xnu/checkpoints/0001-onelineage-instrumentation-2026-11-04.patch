@@ -4023,7 +4023,7 @@ diff -ruN a/osfmk/arm64/proc_reg.h build/xnu-src/source/osfmk/arm64/proc_reg.h
  #endif /* __ARM_16K_PG__ */
 diff -ruN a/osfmk/arm64/sleh.c build/xnu-src/source/osfmk/arm64/sleh.c
 --- a/osfmk/arm64/sleh.c	2026-11-03 17:51:44
-+++ build/xnu-src/source/osfmk/arm64/sleh.c	2026-11-03 19:50:02
++++ build/xnu-src/source/osfmk/arm64/sleh.c	2026-11-03 19:55:02
 @@ -26,6 +26,7 @@
   * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
   */
@@ -4059,7 +4059,7 @@ diff -ruN a/osfmk/arm64/sleh.c build/xnu-src/source/osfmk/arm64/sleh.c
  	 * Use KERNEL_DEBUG_CONSTANT_IST here to avoid producing tracepoints
  	 * that would disclose the behavior of PT_DENY_ATTACH processes.
  	 */
-@@ -1861,9 +1882,31 @@
+@@ -1861,9 +1882,39 @@
  	 * sweet: TrustZone owns GIC Group 0, so the timer and IPIs that other
  	 * ARM64 targets take as FIQs arrive here as Group 1 IRQs.
  	 */
@@ -4084,6 +4084,14 @@ diff -ruN a/osfmk/arm64/sleh.c build/xnu-src/source/osfmk/arm64/sleh.c
 +		if (sweet_exit_tid == 0) {
 +			sweet_early_evidence(0xc3, (uint64_t)sweet_irq_count, 0, 0, 0);
 +		}
++		else {
++			/* 0xc4: the machine is still taking interrupts while the exit thread is stopped */
++			static int sweet_post_exit_irqs;
++			if (sweet_post_exit_irqs < 2) {
++				sweet_post_exit_irqs++;
++				sweet_early_evidence(0xc4, (uint64_t)sweet_irq_count, 0, 0, 0);
++			}
++		}
 +	}
 +	sweet_early_write64(0x17c0, sweet_irq_count);
 +	sweet_early_write64(0x17c8, (uint64_t)intid);
@@ -4091,7 +4099,7 @@ diff -ruN a/osfmk/arm64/sleh.c build/xnu-src/source/osfmk/arm64/sleh.c
  	if (intid >= 1020 && intid <= 1023) {
  		return; /* spurious */
  	}
-@@ -2123,6 +2166,10 @@
+@@ -2123,6 +2174,10 @@
  
  	sp = get_saved_state_sp(&context->ss);
  	kernel_stack_bottom = round_page(thread->machine.kstackptr) - KERNEL_STACK_SIZE;
@@ -7734,8 +7742,8 @@ diff -ruN a/osfmk/kern/task.c build/xnu-src/source/osfmk/kern/task.c
  	boolean_t                       interrupt_save;
 diff -ruN a/osfmk/kern/thread.c build/xnu-src/source/osfmk/kern/thread.c
 --- a/osfmk/kern/thread.c	2023-08-13 22:06:07
-+++ build/xnu-src/source/osfmk/kern/thread.c	2026-11-03 19:38:14
-@@ -622,21 +622,91 @@
++++ build/xnu-src/source/osfmk/kern/thread.c	2026-11-03 19:55:02
+@@ -622,21 +622,101 @@
  		subcode = proc_encode_exit_exception_code(bsd_info);
  		proc_exit(bsd_info);
  		bsd_info = NULL;
@@ -7765,6 +7773,16 @@ diff -ruN a/osfmk/kern/thread.c build/xnu-src/source/osfmk/kern/thread.c
 +		}
 +	}
  		if (task->corpse_info) {
++		{
++			extern void sweet_early_evidence(uint64_t, uint64_t, uint64_t,
++			    uint64_t, uint64_t);
++			static int sweet_f8_records;
++			if (sweet_f8_records < 4) {
++				sweet_f8_records++;
++				sweet_early_evidence(0xf8, (uint64_t)current_thread()->thread_id,
++				    (uint64_t)task->corpse_info, 0, 0);
++			}
++		}
  			/* reset all except task name port */
  			ipc_task_reset(task);
 +	{
@@ -7827,7 +7845,7 @@ diff -ruN a/osfmk/kern/thread.c build/xnu-src/source/osfmk/kern/thread.c
  	if (threadcnt == 0) {
  		task_lock(task);
  		if (task_is_a_corpse_fork(task)) {
-@@ -645,6 +715,26 @@
+@@ -645,6 +725,26 @@
  		task_unlock(task);
  	}
  
@@ -7854,7 +7872,7 @@ diff -ruN a/osfmk/kern/thread.c build/xnu-src/source/osfmk/kern/thread.c
  	s = splsched();
  	thread_lock(thread);
  
-@@ -744,6 +834,16 @@
+@@ -744,6 +844,16 @@
  
  	thread_block((thread_continue_t)thread_terminate_continue);
  	/*NOTREACHED*/

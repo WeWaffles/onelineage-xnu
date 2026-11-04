@@ -69,6 +69,8 @@ The recorded tags, in the order they were added:
 | 0xf5 | `osfmk/kern/ipc_tt.c` | before `itk_lock(task)` |
 | 0xf6 | `osfmk/kern/ipc_tt.c` | after `itk_lock(task)` |
 | 0xf7 | `osfmk/kern/ipc_tt.c` | end of `ipc_task_reset` |
+| 0xf8 | `osfmk/kern/thread.c` | inside the corpse block, with `task->corpse_info` as the value |
+| 0xc4 | `osfmk/arm64/sleh.c` | post-exit liveness: an IRQ was still taken, capped at 2 |
 
 **A note on 0xd9–0xdb.** These were listed here before they existed in the
 kernel: the insert used an anchor that no longer matched, the patch script
