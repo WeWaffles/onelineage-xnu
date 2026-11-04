@@ -61,12 +61,20 @@ def main() -> int:
         baseline = adb(["exec-out", "su", "0", "sh", "-c", "cat /proc/last_kmsg"],
                        timeout=30)
         print(f"baseline {len(baseline)} bytes", flush=True)
-        off_deadline = time.time() + min(args.timeout, 120)
+        off_deadline = time.time() + min(args.timeout, 240)
+        left = False
         while time.time() < off_deadline:
             if b"\tdevice" not in adb(["devices"], timeout=10):
                 print("device left (jump taken)", flush=True)
+                left = True
                 break
             time.sleep(1)
+        if not left:
+            # hw/m395: the window expired while a build ran, the grabber then
+            # read the pre-jump boot and saved it as if it were the run.
+            print("device never left - refusing to capture the old boot",
+                  file=sys.stderr, flush=True)
+            return 3
 
     if not wait_for_device(time.time() + args.timeout):
         print("device never came back", file=sys.stderr)
