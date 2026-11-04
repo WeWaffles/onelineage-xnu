@@ -332,12 +332,24 @@ _RAW_CODE = [
     # exactly spent by the time it ran (7 payload calls + 5 parent getpid = 12).
     # Mach traps are recorded by the separate 0xb6 budget, and the trap number
     # itself distinguishes the two processes: 28 (task_self) in the parent,
-    # 26 (mach_reply_port) in the child.  A 0xb6 with trap 26 can only come from
+    # 27 (thread_self) in the child.  A 0xb6 with trap 26 can only come from
     # the child, and neither loop can exhaust the other's budget.
     #
-    ("cbz", 0, "kid"),
-    "loop", ("movn", 16, 27), ("svc",), ("b", "loop"),      # 28 task_self
-    "kid", ("movn", 16, 25), ("svc",), ("b", "kid"),        # 26 mach_reply_port
+    #
+    # Which process is this?  x1, not x0.
+    #
+    # hw/m366 read the child's saved user state at the instant it returned to
+    # EL0: x0 = 2.  XNU's arm64 fork convention puts the child's pid in x0 for
+    # both sides of the fork and marks the child with x1 = 1 (thread_set_child
+    # in osfmk/arm64/status.c); the parent leaves with x1 = 0, and libsyscall's
+    # stub tests x1 to decide whether to zero x0.  So a cbz on x0 never fires,
+    # and every child in hw/m359..m365 was running the parent's loop -- which is
+    # why no probe ever recorded a child-only call.  Test x1, and the child falls
+    # through into its own loop while the parent branches away.
+    #
+    ("cbz", 1, "loop"),                                     # x1 == 0 -> parent
+    "kid", ("movn", 16, 26), ("svc",), ("b", "kid"),        # 27 thread_self (child)
+    "loop", ("movn", 16, 27), ("svc",), ("b", "loop"),      # 28 task_self (parent)
 
 ]
 ASM_CODE = _assemble(
