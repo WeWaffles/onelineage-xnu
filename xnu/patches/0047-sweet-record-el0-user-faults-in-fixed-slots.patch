@@ -67,7 +67,18 @@
  #include <arm64/sweet_early.h>
  #include <arm/caches_internal.h>
  #include <arm/cpu_data.h>
-@@ -736,6 +744,13 @@
+@@ -732,10 +740,23 @@
+ 	if (is_user) {
+ 		static int sweet_user_faults;
+ 
+-		if (sweet_user_faults < 8) {
++		/*
++		 * m492: this branch is reached for every EL0 synchronous exception,
++		 * including the 0x15 SVC that carries a syscall.  Without this filter
++		 * the harness's own syscalls consumed all eight records before the
++		 * child ever faulted.  Record faults, not traps.
++		 */
++		if (sweet_user_faults < 8 && ESR_EC(esr) != 0x15) {
  			sweet_user_faults++;
  			sweet_early_evidence(0xc1, (uint64_t)esr, (uint64_t)far,
  			    get_saved_state_pc(state), (uint64_t)ESR_EC(esr));
