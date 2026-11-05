@@ -59,7 +59,7 @@
   "handoff_status": {
     "ram_map": "not applicable",
     "framebuffer": "not applicable",
-    "safe_payload_region": "not applicable",
-    "execution_authorized": "not applicable"
+    "safe_payload_region": "not selected",
+    "execution_authorized": false
   }
 }
