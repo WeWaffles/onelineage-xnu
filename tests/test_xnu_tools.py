@@ -187,7 +187,7 @@ class XnuSeriesTest(unittest.TestCase):
     def test_vendored_series_matches_manifest(self):
         self.assertEqual(self.series["source"]["tag"], "xnu-8796.141.3")
         self.assertEqual(len(self.patches), len(self.series["patches"]))
-        self.assertEqual([item["name"][:4] for item in self.patches], [f"{index:04d}" for index in range(1, 19)])
+        self.assertEqual([item["name"][:4] for item in self.patches], [f"{index:04d}" for index in range(1, len(self.patches) + 1)])
         for item in self.patches:
             self.assertNotIn(b"\r\n", item["data"])
         self.assertFalse(self.series["constraints"]["phone_execution_authorized"])
