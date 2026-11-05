@@ -58,6 +58,43 @@ SYM_CODE_START(olxnu_stub_start)
 	isb
 
 	/*
+	 * Entry marker.  It has to come AFTER the MMU is off.
+	 *
+	 * The first version of this marker stored to the log region at entry,
+	 * while translation was still on through the identity map that
+	 * install_idmap() left behind.  That map covers the stub's own 2MB
+	 * block and nothing else, so the store to 0x8883F0068 was a translation
+	 * fault inside the stub — the marker's absence then said nothing about
+	 * whether the branch arrived, and three runs (hw/m56..m58) were read as
+	 * "the stub never ran" when they may have died in the marker itself.
+	 *
+	 * With the MMU off this is a plain physical store, so its presence means
+	 * the branch arrived and the SCTLR/TLB/I-cache sequence completed:
+	 *
+	 *   XNUJMP5 absent          -> the branch never reached this page
+	 *   XNUJMP5 only            -> the core dies in the M=0 -> M=1 -> M=0
+	 *                              toggle (step 3b), i.e. re-enabling
+	 *                              translation through the host's own map is
+	 *                              refused
+	 *   XNUJMP5 and XNUJMP6     -> the toggle is fine, the fault is later
+	 *
+	 * 0x8883F0068/0x8883F0070 are clear of the other channels (0x0000 XNU
+	 * entry, 0x0020 module, 0x0028 XNUJMP2, 0x0038..0x0058 start.s,
+	 * 0x0080/0x0100.. probes).
+	 */
+	movz	x2, #0x0068
+	movk	x2, #0x883f, lsl #16
+	movk	x2, #0x0008, lsl #32		/* x2 = 0x8883F0068 */
+	movz	x3, #0x4e58
+	movk	x3, #0x4a55, lsl #16
+	movk	x3, #0x504d, lsl #32
+	movk	x3, #0x0a35, lsl #48		/* "XNUJMP5\n" */
+	str	x3, [x2]
+	dmb	sy
+
+	/* Enter XNU with the MMU off; the old extra toggle probe is removed. */
+
+	/*
 	 * 4. Load boot_args_pa and entry_pa from the data slots embedded
 	 *    at the end of this stub.  We must do this BEFORE clearing
 	 *    registers so the ADR PC-relative load works.
@@ -100,7 +137,30 @@ SYM_CODE_START(olxnu_stub_start)
 	mov	x29, xzr
 	mov	x30, xzr
 
-	/* 6. Branch to XNU (x0 = boot_args_pa, x1 = entry_pa).
+	/* 6. Control marker.
+	 *
+	 * MMU is off, so this store is Device-nGnRnE and cannot be sitting in a
+	 * dirty cache line when the watchdog resets the board.  That makes it a
+	 * valid control for the XNU markers: if this one survives into
+	 * /proc/last_kmsg but XNU's does not, the evidence channel works and the
+	 * payload never executed; if neither survives, the channel itself is
+	 * broken across a WDT reset.
+	 *
+	 * Address 0x8883F0028 (vendor log region, preserved by the bootloader),
+	 * clear of the kernel's markers at 0x8883F0000 (EL1) and 0x8883F0010
+	 * (EL0) and of the jump module's channel control marker at 0x8883F0020.
+	 */
+	movz	x2, #0x0028
+	movk	x2, #0x883f, lsl #16
+	movk	x2, #0x0008, lsl #32		/* x2 = 0x8883F0028 */
+	movz	x3, #0x4e58
+	movk	x3, #0x4a55, lsl #16
+	movk	x3, #0x504d, lsl #32
+	movk	x3, #0x0a32, lsl #48		/* "XNUJMP2\n" */
+	str	x3, [x2]
+	dmb	sy
+
+	/* 7. Branch to XNU (x0 = boot_args_pa, x1 = entry_pa).
 	 *    If entry_pa is 0 (M3 test path), branch to x0 instead.
 	 */
 	cbz	x1, 1f

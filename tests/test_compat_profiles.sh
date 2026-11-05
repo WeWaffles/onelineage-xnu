@@ -11,7 +11,7 @@ grep -q 'ONELINEAGE_ALLOW_EXPERIMENTAL_GUEST' "$root/assets/compat.sh"
 ! grep -Eq '^[[:space:]]*(kexec|reboot)[[:space:]]' "$root/assets/kexec_backend.sh"
 grep -q 'NO EXECUTION' "$root/assets/kexec_backend.sh"
 grep -q 'xnu-arm64-port' "$root/assets/kexec_backend.sh"
-grep -q '"exact_source_available": false' "$root/kernel/device-abi/sm-s948u-azf1.json"
+grep -q '"exact_source_available": false' "$root/kernel/device-abi/generic-arm64-6.12.30.json"
 ! grep -Eqi 'unlocked_ioctl|compat_ioctl|device_create[[:space:]]*\(|register_restart_handler|kernel_kexec|machine_kexec' "$root/kernel/xnu_probe/onelineage_xnu_probe.c"
 grep -q 'diagnostics.sh' "$root/assets/switch_to_lineage.sh"
 echo 'compatibility profile tests passed'

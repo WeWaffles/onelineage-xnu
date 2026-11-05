@@ -28,7 +28,7 @@ def child(node: adt.Node, name: str) -> adt.Node:
 
 class XnuToolsTest(unittest.TestCase):
     def setUp(self):
-        self.manifest_path = ROOT / "kernel" / "device-hardware" / "sm-s948u-azf1.json"
+        self.manifest_path = ROOT / "kernel" / "device-hardware" / "generic-arm64.json"
         self.manifest = json.loads(self.manifest_path.read_text(encoding="utf-8"))
 
     def test_deterministic_qemu_tree_round_trip(self):

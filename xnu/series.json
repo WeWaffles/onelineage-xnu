@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "milestone": "xnu-early-console-qemu",
+  "milestone": "xnu-physical-el0-markers",
   "source": {
     "project": "xnu",
     "release": "macOS 13.5 (XNU-8796 generation, iOS 16 era)",
@@ -115,6 +115,36 @@
       "name": "0018-sweet-boot-cpu-driver.patch",
       "sha256": "06de6e84d8ff9b0307872fb78a827e84fc1e16a1b7286a87f0e618a5dc2692a9",
       "purpose": "cpus: single-CPU IOCPU bring-up over the legacy IOCPU interface"
+    },
+    {
+      "name": "0019-sweet-el1-el0-execution-markers.patch",
+      "sha256": "ec940b6098cbb6049add16363c09eb2785c50184453987dab3f4cb119e3aa07f",
+      "purpose": "evidence: EL1/EL0 execution markers in the log region the bootloader preserves into /proc/last_kmsg"
+    },
+    {
+      "name": "0020-sweet-early-console-boot-args.patch",
+      "sha256": "fab64849c15a7ed273da51918022ef5b981fe4b84a4ac1f47d6328d1072dca6e",
+      "purpose": "early console: draw only at the framebuffer the boot args name, and stamp boot stages in RAM once the physmap exists"
+    },
+    {
+      "name": "0021-sweet-start-s-mmu-checkpoint.patch",
+      "sha256": "2a08cbe63f1b1213aff90b1a8322a16c54810a526d05e277d2402e42b0121005",
+      "purpose": "evidence: stamp the vendor log region just before the MMU is enabled, so a boot that stops in assembly can be told from one that stops in C"
+    },
+    {
+      "name": "0022-sweet-start-s-bisect-checkpoints.patch",
+      "sha256": "d3d53ccd081d7e9f13f25e1780cee71440aea4b3da1d0ff6645255de8ba6bf0e",
+      "purpose": "evidence: bisect start.s — after the OSLAR/DAIF unlock, the splash band, the boot args, and the bootstrap mappings"
+    },
+    {
+      "name": "0023-sweet-gate-qemu-splash-band.patch",
+      "sha256": "4ded97c4eb73a5d87b8f914062f1930f61a89ac51ee751cabddaff9f5d166f9a",
+      "purpose": "start: build the QEMU splash band only when asked, since its hardcoded framebuffer store aborts on real hardware before the vectors exist"
+    },
+    {
+      "name": "0024-sweet-bootstrap-stage-channel.patch",
+      "sha256": "49dacb6c302bafec9b35c6e39c6e4f49e1ec8ac999d100e40e6d5931b0650d2e",
+      "purpose": "evidence: map the log region into the bootstrap V=P table so stages are readable from arm_init entry, stamp the moment translation turns on, and switch to the physmap once that map is gone"
     }
   ],
   "verified": {

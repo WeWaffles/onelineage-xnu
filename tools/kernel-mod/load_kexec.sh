@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Load the kexec-as-a-module pair on the SM-S948U.
+# Load the kexec-as-a-module pair on the the arm64 target.
 #
 # Loading is inert: /dev/kexec appears, but nothing leaves the running kernel
 # until the exec ioctl is issued. This script stops before that on purpose.

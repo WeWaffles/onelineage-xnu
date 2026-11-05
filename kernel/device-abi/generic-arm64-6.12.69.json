@@ -1,0 +1,41 @@
+{
+  "device": "generic-arm64",
+  "build": "generic",
+  "kernel_release": "6.12.69-android16-6-generic-4k",
+  "vermagic": "6.12.69-android16-6-generic-4k SMP preempt mod_unload modversions aarch64",
+  "module_layout_crc": "0x797f2b3e",
+  "module_layout_crc_source": "modversion_info entries in vendor modules of this build, all agreeing",
+  "exact_source_available": false,
+  "module_config": {
+    "CONFIG_MODVERSIONS": true,
+    "CONFIG_MODULE_SIG": true,
+    "CONFIG_MODULE_SIG_FORCE": false,
+    "CONFIG_MODULE_SIG_PROTECT": true,
+    "CONFIG_MODULE_UNLOAD": true,
+    "CONFIG_STRICT_MODULE_RWX": true,
+    "CONFIG_KALLSYMS": true,
+    "CONFIG_KALLSYMS_ALL": true,
+    "CONFIG_RANDOMIZE_BASE": true,
+    "CONFIG_ARM64_PTR_AUTH_KERNEL": true
+  },
+  "kexec_state": {
+    "CONFIG_KEXEC": false,
+    "CONFIG_KEXEC_FILE": false,
+    "machine_kexec_present": false,
+    "relocate_kernel_present": false,
+    "notes": "Only the weak ENOSYS stubs __arm64_sys_kexec_load / __arm64_sys_kexec_file_load exist. No kexec core to call; a module would have to implement the EL1 transition itself."
+  },
+  "runtime_status": "unverified on this build",
+  "supersedes": "generic-arm64-6.12.30.json (stale)",
+  "source": "read from a generic Android 16 GKI build",
+  "module_abi_parity": {
+    "verified_on": "2026-10-31",
+    "base_tree": "android16-6.12-2026-03 (Android common, SUBLEVEL 69)",
+    "config_source": "generic build config",
+    "module_layout_crc_from_tree": "0x797f2b3e",
+    "module_layout_crc_from_device": "0x797f2b3e",
+    "verdict": "match - struct module layout of the reconstructed tree agrees with the running build",
+    "vermagic_note": "tree must be given the build's CONFIG_LOCALVERSION; patching include/generated/utsrelease.h and include/config/kernel.release and rebuilding only the module is sufficient",
+    "tool": "tools/kernel-mod/verify_module_abi.py"
+  }
+}

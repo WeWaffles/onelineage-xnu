@@ -14,7 +14,7 @@ if ($Compat -notmatch 'ONELINEAGE_ALLOW_EXPERIMENTAL_GUEST') { throw 'Experiment
 if ($Kexec -match '(?m)^\s*(kexec|reboot)\s') { throw 'kexec probe contains an execution command' }
 if ($Kexec -notmatch 'NO EXECUTION') { throw 'kexec probe safety marker missing' }
 if ($Kexec -notmatch 'xnu-arm64-port') { throw 'kexec probe target is not explicitly XNU' }
-$AbiProfile = Get-Content (Join-Path $Root 'kernel/device-abi/sm-s948u-azf1.json') -Raw | ConvertFrom-Json
+$AbiProfile = Get-Content (Join-Path $Root 'kernel/device-abi/generic-arm64-6.12.30.json') -Raw | ConvertFrom-Json
 if ($AbiProfile.exact_source_available -ne $false) { throw 'source-unavailable ABI profile must block module loading' }
 $Probe = Get-Content (Join-Path $Root 'kernel/xnu_probe/onelineage_xnu_probe.c') -Raw
 if ($Probe -match '(?i)unlocked_ioctl|compat_ioctl|device_create\s*\(|register_restart_handler|kernel_kexec|machine_kexec') { throw 'inert XNU probe exposes an execution mechanism' }

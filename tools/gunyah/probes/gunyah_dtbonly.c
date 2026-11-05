@@ -1,6 +1,6 @@
 /*
  * Test: VM_START with only DTB config set (no SET_USER_MEM_REGION).
- * Checks if the DTB config parcel allocation itself triggers RM rejection on Samsung.
+ * Checks if the DTB config parcel allocation itself triggers RM rejection on vendor.
  * Also tries without SET_DTB_CONFIG to isolate what causes the SHARE_MEMORY error.
  */
 #include <stdio.h>

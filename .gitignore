@@ -30,3 +30,7 @@ backups/
 
 # macOS
 .DS_Store
+
+# Build outputs (rebuilt locally, not published)
+/build/
+*.ko

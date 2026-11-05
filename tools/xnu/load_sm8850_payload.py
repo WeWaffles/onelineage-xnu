@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Load an ONELXNU payload onto the physical SM-S948U and print jump parameters.
+"""Load an ONELXNU payload onto the physical the arm64 target and print jump parameters.
 
 Usage:
   python3 load_sm8850_payload.py PAYLOAD [--ramdisk RAMDISK] [--proc PATH]

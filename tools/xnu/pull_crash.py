@@ -106,7 +106,7 @@ def main() -> int:
         # The first one after the device returns is the jumped boot; a later
         # poll can be the *next* Android boot, whose dmesg no longer holds the
         # module's markers.  hw/m402 kept only the largest, which was an
-        # Android log ("vendor.samsung") with no XNUJMP1 at all, so the one
+        # Android log ("vendor.vendor") with no XNUJMP1 at all, so the one
         # dump that could have said something was overwritten.
         if len(data) > 1024 and data != baseline:
             import hashlib

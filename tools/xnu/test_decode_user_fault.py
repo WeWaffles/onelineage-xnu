@@ -97,7 +97,7 @@ def main() -> int:
     check(((abort >> 26) & 0x3F) == 0x25, "data abort ESR decodes to EC 0x25")
     check(((abort >> 26) & 0x3F) != 0x15, "filter EC != 0x15 keeps an abort")
     check(((svc >> 26) & 0x3F) == 0x15, "filter EC != 0x15 drops m492's SVCs")
-    rec = dict(off=0x1b00, qwords=[dp.UF_MAGIC, 1, 2, abort, 0x100004000,
+    rec = dict(off=dp.UF_BASE, qwords=[dp.UF_MAGIC, 1, 2, abort, 0x100004000,
                                    0x100000408, 0x25, 0x80000000])
     r2 = dp.decode(synthetic([rec]))
     got = r2["user_faults"][0] if r2 and r2["user_faults"] else None
@@ -126,7 +126,10 @@ def main() -> int:
     rec_a = dict(off=slot(2), qwords=[dp.UF_MAGIC, 9, 2, 0x96000045,
                                       0x100008b80, 0x100000370, 0x26, 0x60000000])
     buf = bytearray(synthetic([rec_a]))
-    for o in range(0x2000 + 0x1500, 0x2000 + 0x6000 - 8, 8):
+    # Log text starts above the +0x1780 header, as m496 shows (first text at
+    # +0x1c00); starting it at +0x1500 would also destroy the base marker and
+    # the test would be measuring its own overlay rather than the slot page.
+    for o in range(0x2000 + 0x1c00, 0x2000 + 0x6000 - 8, 8):
         buf[o:o+8] = struct.pack("<Q", 0x5f726f665f647461)
     rl = dp.decode(bytes(buf))
     got = rl["user_faults"][0] if rl and rl["user_faults"] else None

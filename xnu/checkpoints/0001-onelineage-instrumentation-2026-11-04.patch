@@ -2744,7 +2744,7 @@ diff -ruN a/osfmk/arm/arm_init.c build/xnu-src/source/osfmk/arm/arm_init.c
 +	 * probes that bisect *that* interval are at 0x0110..0x0128 above.
 +	 *
 +	 * (hw/m95_run read "stage 0" and was misread as "past arm_vm_init": the
-+	 * channel word sits in the Samsung log region, which the kernel's own ring
++	 * channel word sits in the vendor log region, which the kernel's own ring
 +	 * buffer also writes, so a single word can be partially clobbered.  Only
 +	 * the distinct slots are trustworthy, and only the *last* shared word is
 +	 * even a hint.)
@@ -4848,7 +4848,7 @@ diff -ruN a/osfmk/arm64/start.s build/xnu-src/source/osfmk/arm64/start.s
 +	 * OneLineage probes, ASCII: the translation state the branch inherits.
 +	 *
 +	 * The binary words above cannot answer this.  They are written straight
-+	 * into the Samsung log region, and that region overlaps the live kernel
++	 * into the vendor log region, and that region overlaps the live kernel
 +	 * ring buffer, so after a reset /proc/last_kmsg holds it as interleaved
 +	 * text: 8-byte words are unreadable there, single ASCII tags are not.
 +	 * hw/m92_run and hw/m93_run both stopped with no tag past XNKVA01 and no
@@ -5088,7 +5088,7 @@ diff -ruN a/osfmk/arm64/sweet_early.c build/xnu-src/source/osfmk/arm64/sweet_ear
 +#endif
  
  /*
-  * Stage stamps in the Samsung log region, which the bootloader preserves into
+  * Stage stamps in the vendor log region, which the bootloader preserves into
 @@ -37,7 +65,7 @@
   * are visible.  Once that map goes away only the physmap works, which is why
   * arm_init arms the second path after arm_vm_init returns.
@@ -9902,7 +9902,7 @@ diff -ruN a/pexpert/pexpert/arm64/SWEET.h build/xnu-src/source/pexpert/pexpert/a
 +/*
 + * OneLineage evidence channel: where the boot stamps its markers.
 + *
-+ * On the phone this is the Samsung log region, which the bootloader preserves
++ * On the phone this is the vendor log region, which the bootloader preserves
 + * into /proc/last_kmsg across a watchdog reset.  QEMU has no such region (its
 + * RAM is 2GB at 0x40000000), so SWEET_QEMU_LOG moves the markers inside that
 + * RAM instead; the harness builds its kernel with that defined and reads the

@@ -6,7 +6,7 @@
  * ---------------------
  * Every earlier probe handed memory to the VM with GH_VM_SET_USER_MEM_REGION,
  * which the kernel turns into a *shared* parcel (two ACL entries, RM message
- * MEM_SHARE).  Samsung's resource manager rejects that with
+ * MEM_SHARE).  vendor's resource manager rejects that with
  *   "gunyah: RM rejected message 5600000b. Error: 10"
  * at GUNYAH_VM_START.
  *

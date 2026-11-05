@@ -80,7 +80,7 @@ def inspect(data: bytes) -> dict:
         "entry_file_offset": entry_file_offset,
         "segments": segments,
         "safe_for_phone_execution": False,
-        "note": "Structural validation only; this does not establish SM-S948U compatibility.",
+        "note": "Structural validation only; this does not establish the arm64 target compatibility.",
     }
 
 

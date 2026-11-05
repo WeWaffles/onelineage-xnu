@@ -1,6 +1,6 @@
-# Gunyah probes (SM-S948U)
+# Gunyah probes (the arm64 target)
 
-Small userspace probes for the phone's `/dev/gunyah`. They create VMs and inspect how the Samsung
+Small userspace probes for the phone's `/dev/gunyah`. They create VMs and inspect how the vendor
 resource manager responds. Nothing here writes a partition, loads a module, or touches the
 `trustedvm`.
 

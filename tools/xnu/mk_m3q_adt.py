@@ -129,7 +129,7 @@ def build_qemu(manifest: dict, ramdisk_size: int = 0) -> adt.Node:
         ("model", CSTR("OneLineage m3q XNU QEMU validation")),
         # "xiaomi,sweet" must be present: patch 0016 matches IONameMatch='xiaomi,sweet'
         # against the root node to instantiate SweetPlatformExpert.
-        ("compatible", CSTR("xiaomi,sweet") + CSTR("samsung,m3q") + CSTR(manifest["soc"]) + CSTR("AppleARM")),
+        ("compatible", CSTR("xiaomi,sweet") + CSTR("vendor,m3q") + CSTR(manifest["soc"]) + CSTR("AppleARM")),
         ("#address-cells", U32(2)),
         ("#size-cells", U32(2)),
         ("platform-name", CSTR("OneLineage-m3q-qemu")),

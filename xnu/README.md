@@ -3,7 +3,7 @@
 This directory makes the first XNU milestone reproducible: obtain one exact XNU
 tree, apply one exact patch series, and build one exact kernel configuration.
 Nothing here is a phone operation. No boot partition, running kernel, or payload
-is touched, and none of this authorizes execution on the SM-S948U.
+is touched, and none of this authorizes execution on the the arm64 target.
 
 The milestone is the one recorded in `XNU_PROGRESS.md`: an XNU kernel built from
 source that reaches an identifiable early boot message in QEMU. Phone support is
@@ -100,7 +100,7 @@ XNU-8796 IORPC ABI) and uploads the kernel and build log as artifacts. It needs
 | Series applies in order to pristine `xnu-8796.141.3` | verified (2026-10-24) |
 | Compiles and links | **not run** — needs macOS/Xcode |
 | Reaches an early console line in QEMU | **not run** |
-| Anything on the SM-S948U | not implemented, not authorized |
+| Anything on the the arm64 target | not implemented, not authorized |
 
 ## QEMU harness
 
@@ -108,7 +108,7 @@ Once a kernel is built, `tools/xnu/run_qemu.py` launches it:
 
 ```sh
 # Generate the ADT
-python3 tools/xnu/mk_m3q_adt.py kernel/device-hardware/sm-s948u-azf1.json \
+python3 tools/xnu/mk_m3q_adt.py kernel/device-hardware/generic-arm64.json \
     build/qemu.adt
 
 # Pack the ONELXNU payload

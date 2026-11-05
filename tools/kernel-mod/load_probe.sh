@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Load the inert M1 diagnostic module on the SM-S948U.
+# Load the inert M1 diagnostic module on the the arm64 target.
 #
 # What this does: insmods a module whose init function prints the running
 # release, page size, online CPU count and sizeof(struct module), then returns 0.
 # It registers no device node, allocates nothing, and cannot transfer control.
 #
 # What to expect on success:
-#   /proc/modules lists s26_handoff_diag, dmesg shows two S26_DIAG lines,
+#   /proc/modules lists handoff_diag, dmesg shows two HANDOFF_DIAG lines,
 #   the phone does not reboot, and the module can be removed with rmmod.
 #
 # What to expect on ABI mismatch (the pre-load verifier exists to prevent this):
@@ -16,8 +16,8 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
-KO="$ROOT/kernel/diag/s26_handoff_diag.ko"
-NAME=s26_handoff_diag
+KO="$ROOT/kernel/diag/handoff_diag.ko"
+NAME=handoff_diag
 REMOTE=/data/local/tmp/$NAME.ko
 
 [ -f "$KO" ] || { echo "missing $KO" >&2; exit 1; }
@@ -30,8 +30,8 @@ echo "== pre-flight: ABI =="
 if command -v docker >/dev/null && docker inspect s26-gki-build >/dev/null 2>&1; then
     docker cp "$KO" s26-gki-build:/tmp/preflight.ko >/dev/null
     docker exec s26-gki-build python3 /lab/olverify.py verify /tmp/preflight.ko \
-        /lab/device-crcs.json \
-        "6.12.69-android16-6-pb4d3caf-abogkiS948USQS4BZIG-4k SMP preempt mod_unload modversions aarch64" \
+        /lab/kernel-symbol-crcs.json \
+        "6.12.69-android16-6-pb4d3caf-abogkigeneric-4k SMP preempt mod_unload modversions aarch64" \
         | sed 's/^/   /'
 else
     echo "   (container s26-gki-build unavailable; skipping CRC cross-check)"
@@ -48,7 +48,7 @@ fi
 
 echo "== after =="
 adb shell "su -c \"grep -w $NAME /proc/modules || echo '! module not listed'\"" | sed 's/^/   /'
-adb shell "su -c 'dmesg | grep S26_DIAG | tail -5'" | sed 's/^/   /'
+adb shell "su -c 'dmesg | grep HANDOFF_DIAG | tail -5'" | sed 's/^/   /'
 adb shell 'uptime' | sed 's/^/   /'
 
 echo

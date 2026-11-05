@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate an SM8850 (Galaxy S26 Ultra / canoe) ADT for physical XNU boot.
+"""Generate an SM8850 (the arm64 target / canoe) ADT for physical XNU boot.
 
 Physical constants:
   GIC: GICD=0x17000000 GICR=0x17080000 (from sm8850_device.dts)
@@ -97,7 +97,7 @@ def build_sm8850(ramdisk_size: int = 0) -> adt.Node:
         ("debug-enabled", U32(1)),
         ("firmware-version", CSTR("OneLineage-sm8850-phys")),
         ("system-firmware-version", CSTR("OneLineage-sm8850-phys")),
-        ("source-device", CSTR("samsung,e3q")),
+        ("source-device", CSTR("vendor,e3q")),
     ], [make_node("memory-map", memmap_props)])
 
     #
@@ -119,7 +119,7 @@ def build_sm8850(ramdisk_size: int = 0) -> adt.Node:
     # kernels appeared to stop at different stages (hw/m99, m101, m106, m109,
     # m110 panicked there; hw/m102, m104, m112 jumped from core 0 and ran on).
     #
-    # Values come from kernel/device-hardware/sm-s948u-azf1.json
+    # Values come from kernel/device-hardware/generic-arm64.json
     # (cpu.mpidr_affinities).  XNU identifies a CPU by AFF0|AFF1 only, so the
     # two cores in the second cluster (0x10000, 0x10100) collapse onto the
     # first two — that is upstream behaviour, and harmless here because boot
@@ -207,7 +207,7 @@ def build_sm8850(ramdisk_size: int = 0) -> adt.Node:
         ph(),
         ("model", CSTR("OneLineage SM8850 XNU physical")),
         # "xiaomi,sweet" must match: SweetPlatformExpert IONameMatch
-        ("compatible", CSTR("xiaomi,sweet") + CSTR("samsung,e3q") + CSTR("qcom,sm8850") + CSTR("AppleARM")),
+        ("compatible", CSTR("xiaomi,sweet") + CSTR("vendor,e3q") + CSTR("qcom,sm8850") + CSTR("AppleARM")),
         ("#address-cells", U32(2)),
         ("#size-cells", U32(2)),
         ("platform-name", CSTR("OneLineage-sm8850-phys")),

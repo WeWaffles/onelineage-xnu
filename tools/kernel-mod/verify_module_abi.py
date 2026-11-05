@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Verify a .ko against the SM-S948U running kernel's module ABI.
+"""Verify a .ko against the the arm64 target running kernel's module ABI.
 
 Two independent checks:
   1. vermagic string must match the running kernel exactly.
-  2. every symbol the module imports must carry the same CRC as Samsung's
+  2. every symbol the module imports must carry the same CRC as vendor's
      own shipped modules for this build.
 """
 import json

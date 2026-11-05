@@ -5,7 +5,7 @@ The same source tree produces both kernels, but two switches in
 pexpert/arm64/SWEET.h must disagree between the targets:
 
   SWEET_QEMU_LOG      log region at 0x8F000000 (QEMU RAM) instead of
-                      0x8883F0000 (the Samsung region the phone's bootloader
+                      0x8883F0000 (the vendor region the phone's bootloader
                       preserves).  Getting this wrong is not subtle but it is
                       confusing: a phone build run under QEMU takes a data abort
                       on its first log store, lands in the entry stub's fault
@@ -145,7 +145,7 @@ def build_qemu_payload(ramdisk: str, outdir: pathlib.Path) -> int:
         return 1
     cmds = [
         ["python3", "tools/xnu/mk_m3q_adt.py",
-         "kernel/device-hardware/sm-s948u-azf1.json", str(adt),
+         "kernel/device-hardware/generic-arm64.json", str(adt),
          "--mode", "qemu", "--ramdisk", ramdisk],
         ["python3", "tools/xnu/build_payload.py",
          "build/xnu-build/sym/kernel.development.sweet", str(adt), str(payload),

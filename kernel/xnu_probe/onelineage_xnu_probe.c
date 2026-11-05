@@ -5,7 +5,7 @@
  * This module intentionally has no device node, sysfs entry, ioctl, payload
  * loader, memory allocation, reboot hook, or transfer-of-control path.  Its
  * only purpose is to prove that an out-of-tree module can be accepted by the
- * exact running Samsung kernel and then removed cleanly.
+ * exact running vendor kernel and then removed cleanly.
  */
 #include <linux/init.h>
 #include <linux/module.h>

@@ -83,7 +83,7 @@ MODULE_PARM_DESC(borrow_unsafe, "memremap() non-reserved System RAM instead of o
 /*
  * Non-reserved System RAM on this device (from /proc/iomem), minus the RBIN
  * tail.  The image must live inside this window: below it is firmware, above
- * it Samsung's RAM compression region.
+ * it vendor's RAM compression region.
  */
 #define OLXNU_SAFE_START 0x9FF000000UL
 #define OLXNU_SAFE_END   0xAEAB0E000UL
@@ -376,7 +376,7 @@ static int acr_claim(unsigned long pa, unsigned int *used_mt_out)
  * Probe candidate windows when the requested base is not isolatable.
  *
  * The requested base is a "safe" (non-reserved) window, but non-reserved does
- * not mean unused: Samsung's drivers pin page tables, ION/dma-buf and slab
+ * not mean unused: vendor's drivers pin page tables, ION/dma-buf and slab
  * there, and start_isolate_page_range() refuses the whole 64 MB window if a
  * single pageblock contains an unmovable page.  So the base is a *hint*: scan
  * the safe window in both directions and take the first window the kernel can
@@ -575,7 +575,7 @@ static cma_name_fn_t    fn_cma_name;
 /*
  * Restrict the CMA area search to names containing this substring.  Taking
  * pages out of a pool a driver has already mapped (display/GPU pools are
- * mapped into the SMMU and hashed by Samsung's gcma) is asking for a
+ * mapped into the SMMU and hashed by vendor's gcma) is asking for a
  * subsystem fault, so the caller can pin the search to a safe pool.
  */
 static char *cma_name_filter;
