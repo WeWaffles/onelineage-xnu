@@ -41,7 +41,10 @@ class XnuToolsTest(unittest.TestCase):
         self.assertEqual(len(child(root, "cpus").children), 1)
         gic = child(child(root, "arm-io"), "gic")
         regs = struct.unpack("<4Q", gic.prop("reg"))
-        self.assertEqual(regs[0], mk_m3q_adt.QEMU_GICD)
+        # reg values are offsets from soc_base_phys (ranges[1] == QEMU_GICD),
+        # so GICD is offset 0 and GICR is relative to it.
+        self.assertEqual(regs[0], 0)
+        self.assertEqual(regs[2], mk_m3q_adt.QEMU_GICR - mk_m3q_adt.QEMU_GICD)
         self.assertNotEqual(regs[0], int(self.manifest["gic"]["distributor_base"], 0))
 
     def test_root_compatible_contains_xiaomi_sweet(self):
@@ -183,7 +186,8 @@ class XnuSeriesTest(unittest.TestCase):
 
     def test_vendored_series_matches_manifest(self):
         self.assertEqual(self.series["source"]["tag"], "xnu-8796.141.3")
-        self.assertEqual(len(self.patches), 18)
+        manifest = json.loads(self.series.read_text(encoding="utf-8"))
+        self.assertEqual(len(self.patches), len(manifest["patches"]))
         self.assertEqual([item["name"][:4] for item in self.patches], [f"{index:04d}" for index in range(1, 19)])
         for item in self.patches:
             self.assertNotIn(b"\r\n", item["data"])
