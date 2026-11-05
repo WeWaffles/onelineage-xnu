@@ -1,0 +1,23 @@
+diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
+index 60ead0c..c02972d 100644
+--- a/osfmk/arm64/start.s
++++ b/osfmk/arm64/start.s
+@@ -790,6 +790,18 @@ common_start:
+ 	PAC_INIT_KEY_STATE tmp=x0, tmp2=x1
+ #endif /* HAS_APPLE_PAC */
+ 
++	/*
++	 * OneLineage checkpoint: reached the end of start.s, about to enable the
++	 * MMU.  Still running with translation off, so this store goes straight to
++	 * the vendor log region and survives the watchdog reset.  Patches the
++	 * reason a boot that stops after the entry marker can be narrowed down:
++	 * entry stamp only -> died earlier in start.s; this stamp -> died in C.
++	 */
++	MOV64   x27, 0x8883F0038
++	MOV64   x28, 0x0a31554d4d554e58		/* "XNUMMU1\n" */
++	str     x28, [x27]
++	dmb     sy
++
+ 	// Enable caches, MMU, ROP and JOP
+ 	MOV64   x0, SCTLR_EL1_DEFAULT
+ 	MSR_SCTLR_EL1_X0

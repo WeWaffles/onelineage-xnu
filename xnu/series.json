@@ -118,17 +118,17 @@
     },
     {
       "name": "0019-sweet-el1-el0-execution-markers.patch",
-      "sha256": "ec940b6098cbb6049add16363c09eb2785c50184453987dab3f4cb119e3aa07f",
+      "sha256": "0fbfae07bd42465920f5e4bfdfbc667f045ad66513442b8834167404770eea49",
       "purpose": "evidence: EL1/EL0 execution markers in the log region the bootloader preserves into /proc/last_kmsg"
     },
     {
       "name": "0020-sweet-early-console-boot-args.patch",
-      "sha256": "fab64849c15a7ed273da51918022ef5b981fe4b84a4ac1f47d6328d1072dca6e",
+      "sha256": "70a9e0262a32837ea60611b11df11416aaee735d6009cb2440102bad63df3700",
       "purpose": "early console: draw only at the framebuffer the boot args name, and stamp boot stages in RAM once the physmap exists"
     },
     {
       "name": "0021-sweet-start-s-mmu-checkpoint.patch",
-      "sha256": "2a08cbe63f1b1213aff90b1a8322a16c54810a526d05e277d2402e42b0121005",
+      "sha256": "b5e000cd8822f129a000581c191623d695fb31b613ae3dd43d94885e206544f8",
       "purpose": "evidence: stamp the vendor log region just before the MMU is enabled, so a boot that stops in assembly can be told from one that stops in C"
     },
     {
@@ -143,7 +143,7 @@
     },
     {
       "name": "0024-sweet-bootstrap-stage-channel.patch",
-      "sha256": "49dacb6c302bafec9b35c6e39c6e4f49e1ec8ac999d100e40e6d5931b0650d2e",
+      "sha256": "19ccfafddf1e76f387a7f8d9cb6d9d9ed05005b20a3ed444c8a4b26b027ff111",
       "purpose": "evidence: map the log region into the bootstrap V=P table so stages are readable from arm_init entry, stamp the moment translation turns on, and switch to the physmap once that map is gone"
     },
     {

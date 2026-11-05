@@ -1,0 +1,60 @@
+diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
+index c02972d..9d12ce8 100644
+--- a/osfmk/arm64/start.s
++++ b/osfmk/arm64/start.s
+@@ -474,6 +474,17 @@ LEXT(start_first_cpu)
+ 	msr		OSLAR_EL1, xzr
+ 	msr		DAIFSet, #(DAIFSC_ALL)				// Disable all interrupts
+ 
++	/*
++	 * OneLineage checkpoint: survived the OSLAR_EL1 unlock and the DAIF mask.
++	 * OSLAR_EL1 is an external-debug register, so a platform hypervisor can
++	 * trap this access and take the core away from EL1; the entry stamp above
++	 * alone cannot tell that apart from a later hang.
++	 */
++	MOV64	x9, 0x8883F0040
++	MOV64	x10, 0x0a31304c534f4e58		/* "XNOSL01\n" */
++	str		x10, [x9]
++	dmb		sy
++
+ 	mov		x20, x0
+ 	mov		x21, #0
+ 
+@@ -496,6 +507,12 @@ Lsweet_mark_pixel:
+ 	dsb		sy
+ #endif
+ 
++	/* OneLineage checkpoint: survived the splash band write. */
++	MOV64	x11, 0x8883F0048
++	MOV64	x12, 0x0a31304c50534e58		/* "XNSPL01\n" */
++	str		x12, [x11]
++	dmb		sy
++
+ 	// Set low reset vector before attempting any loads
+ 	adrp	x0, EXT(LowExceptionVectorBase)@page
+ 	add		x0, x0, EXT(LowExceptionVectorBase)@pageoff
+@@ -509,6 +526,12 @@ Lsweet_mark_pixel:
+ 	adrp	x25, EXT(bootstrap_pagetables)@page	// Get the start of the page tables
+ 	ldr		x26, [x20, BA_BOOT_FLAGS]			// Get the kernel boot flags
+ 
++	/* OneLineage checkpoint: boot args read (x22-x26 loaded). */
++	MOV64	x11, 0x8883F0050
++	MOV64	x12, 0x0a31304752414e58		/* "XNARG01\n" */
++	str		x12, [x11]
++	dmb		sy
++
+ 	// Clear the registers that will be used to store the userspace thread pointer and CPU number.
+ 	// We may not actually be booting from ordinal CPU 0, so this register will be updated
+ 	// in ml_parse_cpu_topology(), which happens later in bootstrap.
+@@ -662,6 +685,11 @@ Lkernelcache_base_found:
+ 	/* Ensure TTEs are visible */
+ 	dsb		ish
+ 
++	/* OneLineage checkpoint: bootstrap mappings written, entering common_start. */
++	MOV64	x11, 0x8883F0058
++	MOV64	x12, 0x0a31304554504e58		/* "XNPTE01\n" */
++	str		x12, [x11]
++	dmb		sy
+ 
+ 	b		common_start
+ 

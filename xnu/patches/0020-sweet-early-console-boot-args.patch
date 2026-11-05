@@ -1,0 +1,147 @@
+diff --git a/osfmk/arm/arm_init.c b/osfmk/arm/arm_init.c
+index 42362c5..65aa4f0 100644
+--- a/osfmk/arm/arm_init.c
++++ b/osfmk/arm/arm_init.c
+@@ -347,6 +347,13 @@ arm_init(
+ 	DTEntry chosen = NULL;
+ 	unsigned int dt_entry_size = 0;
+ 
++	/*
++	 * Point the bootstrap console at the framebuffer the boot args describe
++	 * before its first draw.  The compiled-in address is the QEMU board's;
++	 * on real hardware it is not mapped yet, and writing there faults.
++	 */
++	sweet_early_set_fb(args->Video.v_baseAddr);
++
+ 	sweet_early_mark(1, "arm_init entered (MMU on)");
+ 
+ 	arm_setup_pre_sign();
+@@ -523,6 +530,8 @@ arm_init(
+ 
+ 	sweet_early_mark(7, "entering arm_vm_init");
+ 	arm_vm_init(xmaxmem, args);
++	/* The physmap exists now, so stages can also be stamped in RAM. */
++	sweet_early_enable_stage_pa();
+ 	sweet_early_mark(15, "arm_vm_init returned");
+ 
+ 	if (debug_boot_arg) {
+diff --git a/osfmk/arm64/sweet_early.c b/osfmk/arm64/sweet_early.c
+index 6928957..224b12d 100644
+--- a/osfmk/arm64/sweet_early.c
++++ b/osfmk/arm64/sweet_early.c
+@@ -11,8 +11,32 @@
+ #include <stdint.h>
+ #include <kern/misc_protos.h>
+ 
++extern void ml_phys_write_double_64(unsigned long long paddr, unsigned long long data);
++extern void flush_dcache64(unsigned long long addr, unsigned count, int phys);
++
+ static volatile uint32_t *early_fb = (volatile uint32_t *)(uintptr_t)0x9c000000;
+ #define EARLY_FB early_fb
++
++/*
++ * The pixel pointer above is the address start.s maps for the QEMU board.  On
++ * real hardware the boot args describe a different framebuffer, so drawing at
++ * the compiled-in address walks into VA space that only exists once the kernel
++ * page tables are installed: the first sweet_early_mark() then faults and the
++ * boot stops with no output anywhere.  sweet_early_set_fb() arms drawing only
++ * when the boot args agree with the address that was mapped.
++ */
++static unsigned int early_fb_usable = 1;
++
++/*
++ * Stage stamps in the vendor log region, which the bootloader preserves into
++ * /proc/last_kmsg across a watchdog reset.  Only usable once the physmap
++ * exists, so arm_init arms it after arm_vm_init returns; before that the
++ * framebuffer above is the only output path.
++ */
++#define EARLY_STAGE_PA 0x8883F0030ULL
++#define EARLY_STAGE_TAG 0x00000000314E5358ULL	/* "XNS1" */
++
++static unsigned int early_stage_pa_ok;
+ #define EARLY_WIDTH 1080u
+ #define EARLY_HEIGHT 2400u
+ #define EARLY_STRIDE (4320u / 4)
+@@ -42,7 +66,7 @@ sweet_early_clear_row(void)
+ void
+ sweet_early_putc(char c)
+ {
+-	if (early_disabled) {
++	if (early_disabled || !early_fb_usable) {
+ 		return;
+ 	}
+ 	if (!early_started) {
+@@ -86,12 +110,42 @@ sweet_early_string(const char *s)
+ 	}
+ }
+ 
++void
++sweet_early_set_fb(uint64_t base)
++{
++	early_fb_usable = (base != 0) && (base == (uint64_t)(uintptr_t)early_fb);
++}
++
++void
++sweet_early_enable_stage_pa(void)
++{
++	early_stage_pa_ok = 1;
++	sweet_early_mark(0, "stage channel armed");
++}
++
++static void
++sweet_early_stage_stamp(unsigned int stage)
++{
++	if (!early_stage_pa_ok) {
++		return;
++	}
++	ml_phys_write_double_64(EARLY_STAGE_PA,
++	    EARLY_STAGE_TAG | ((uint64_t)(stage & 0xff) << 56));
++	flush_dcache64(EARLY_STAGE_PA, 8, TRUE);
++}
++
+ void
+ sweet_early_mark(unsigned int stage, const char *label)
+ {
+ 	if (early_disabled || stage > 20) {
+ 		return;
+ 	}
++	sweet_early_stage_stamp(stage);
++
++	if (!early_fb_usable) {
++		return;
++	}
++
+ 	uint32_t color = 0xff00ff00u | ((stage & 7u) * 32u << 16);
+ 	for (unsigned int y = EARLY_HEIGHT - 32; y < EARLY_HEIGHT; y++) {
+ 		for (unsigned int x = stage * 48; x < (stage + 1) * 48; x++) {
+@@ -112,7 +166,7 @@ sweet_early_mark(unsigned int stage, const char *label)
+ void
+ sweet_early_panic(const char *fmt, va_list *args)
+ {
+-	if (early_disabled || early_panicking) {
++	if (early_disabled || early_panicking || !early_fb_usable) {
+ 		return;
+ 	}
+ 	early_panicking = 1;
+diff --git a/osfmk/arm64/sweet_early.h b/osfmk/arm64/sweet_early.h
+index d7a25f2..682edff 100644
+--- a/osfmk/arm64/sweet_early.h
++++ b/osfmk/arm64/sweet_early.h
+@@ -8,6 +8,8 @@
+ 
+ #if defined(SWEET)
+ void sweet_early_mark(unsigned int stage, const char *label);
++void sweet_early_set_fb(uint64_t base);
++void sweet_early_enable_stage_pa(void);
+ void sweet_early_putc(char c);
+ void sweet_early_panic(const char *fmt, va_list *args);
+ void sweet_early_relocate(uint64_t base);
+@@ -18,6 +20,8 @@ static inline void sweet_early_mark(unsigned int stage, const char *label)
+ 	(void)stage;
+ 	(void)label;
+ }
++static inline void sweet_early_set_fb(uint64_t base) { (void)base; }
++static inline void sweet_early_enable_stage_pa(void) {}
+ static inline void sweet_early_disable(void) {}
+ #endif
+ 

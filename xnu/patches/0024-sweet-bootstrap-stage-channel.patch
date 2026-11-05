@@ -1,0 +1,163 @@
+diff --git a/osfmk/arm/arm_init.c b/osfmk/arm/arm_init.c
+index 65aa4f0..f9469be 100644
+--- a/osfmk/arm/arm_init.c
++++ b/osfmk/arm/arm_init.c
+@@ -347,6 +347,13 @@ arm_init(
+ 	DTEntry chosen = NULL;
+ 	unsigned int dt_entry_size = 0;
+ 
++	/*
++	 * Stamp before touching anything else.  The stage channel uses the log
++	 * region mapped by start.s, so this also proves the KVA entry path works;
++	 * reading the boot args afterwards is the first thing that could fault.
++	 */
++	sweet_early_mark(1, "arm_init entered (MMU on)");
++
+ 	/*
+ 	 * Point the bootstrap console at the framebuffer the boot args describe
+ 	 * before its first draw.  The compiled-in address is the QEMU board's;
+@@ -354,8 +361,6 @@ arm_init(
+ 	 */
+ 	sweet_early_set_fb(args->Video.v_baseAddr);
+ 
+-	sweet_early_mark(1, "arm_init entered (MMU on)");
+-
+ 	arm_setup_pre_sign();
+ 
+ 	arm_slide_rebase_and_sign_image();
+diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
+index 4d62060..b8fd606 100644
+--- a/osfmk/arm64/start.s
++++ b/osfmk/arm64/start.s
+@@ -674,6 +674,30 @@ Lkernelcache_base_found:
+ 	create_bootstrap_mapping x14, x15, x5, x3, x2, x9, x10, x11, x12, x13
+ 
+ #if defined(SWEET)
++	/*
++	 * OneLineage stage channel.
++	 *
++	 * The early console stamps boot stages into the vendor log region at
++	 * 0x8883F0030, which the bootloader preserves into /proc/last_kmsg across
++	 * a watchdog reset.  That address is outside the kernel's bootstrap V=P
++	 * span, so before this block existed every stage between arm_init entry
++	 * and arm_vm_init was invisible: the very window that has been hiding the
++	 * boot failure.  Map its 32MB block here, Normal Non-Cacheable so the
++	 * stamps reach DRAM instead of dying in a dirty cache line on reset.
++	 *
++	 * A second create_bootstrap_mapping call would replace the RAM L2 table,
++	 * so the entry goes into the existing V=P L2 page (bootstrap_pagetables +
++	 * 2*PGBYTES) by index, the same way the splash block below is added.
++	 */
++	MOV64	x10, 0x888000000
++	MOV64	x11, (ARM_TTE_TYPE_BLOCK | ARM_TTE_VALID | ARM_TTE_BLOCK_SH(SH_OUTER_MEMORY) | ARM_TTE_BLOCK_ATTRINDX(CACHE_ATTRINDX_WRITECOMB) | ARM_TTE_BLOCK_AF | ARM_TTE_BLOCK_PNX | ARM_TTE_BLOCK_NX)
++	orr		x11, x11, x10
++	and		x12, x10, #(ARM_TT_L2_INDEX_MASK)
++	lsr		x12, x12, #(ARM_TT_L2_SHIFT)
++	add		x13, x25, #(2 * PGBYTES)
++	str		x11, [x13, x12, lsl #TTE_SHIFT]
++
++#if defined(SWEET_EARLY_SPLASH)
+ 	/*
+ 	 * Splash framebuffer: one 32MB Normal-NC block in the EXISTING V=P
+ 	 * L2 table. Both framebuffer and RAM use L1 index 0; another call to
+@@ -688,7 +712,8 @@ Lkernelcache_base_found:
+ 	lsr		x12, x12, #(ARM_TT_L2_SHIFT)
+ 	add		x13, x25, #(2 * PGBYTES)
+ 	str		x11, [x13, x12, lsl #TTE_SHIFT]
+-#endif
++#endif /* SWEET_EARLY_SPLASH */
++#endif /* SWEET */
+ 
+ 	/* Ensure TTEs are visible */
+ 	dsb		ish
+@@ -843,6 +868,17 @@ common_start:
+ 	MSR_SCTLR_EL1_X0
+ 	isb		sy
+ 
++	/*
++	 * OneLineage checkpoint: translation is on.  The stamp below goes through
++	 * the bootstrap V=P table (the log region block added above), so its
++	 * presence also proves that map works after the MMU is enabled — the
++	 * thing every later stage stamp depends on.
++	 */
++	MOV64   x27, 0x8883F0060
++	MOV64   x28, 0x0a32554d4d554e58		/* "XNUMMU2\n" */
++	str     x28, [x27]
++	dmb     sy
++
+ #if !VMAPPLE && !defined(SWEET)
+ 	MOV64   x1, SCTLR_EL1_DEFAULT
+ 	cmp		x0, x1
+diff --git a/osfmk/arm64/sweet_early.c b/osfmk/arm64/sweet_early.c
+index 224b12d..52def5c 100644
+--- a/osfmk/arm64/sweet_early.c
++++ b/osfmk/arm64/sweet_early.c
+@@ -29,14 +29,19 @@ static unsigned int early_fb_usable = 1;
+ 
+ /*
+  * Stage stamps in the vendor log region, which the bootloader preserves into
+- * /proc/last_kmsg across a watchdog reset.  Only usable once the physmap
+- * exists, so arm_init arms it after arm_vm_init returns; before that the
+- * framebuffer above is the only output path.
++ * /proc/last_kmsg across a watchdog reset.
++ *
++ * Two ways in.  While the bootstrap V=P map is live, start.s maps the log
++ * region's block into it as Normal Non-Cacheable, so the physical address can
++ * be written directly and the stages between arm_init entry and arm_vm_init
++ * are visible.  Once that map goes away only the physmap works, which is why
++ * arm_init arms the second path after arm_vm_init returns.
+  */
+ #define EARLY_STAGE_PA 0x8883F0030ULL
+ #define EARLY_STAGE_TAG 0x00000000314E5358ULL	/* "XNS1" */
+ 
+-static unsigned int early_stage_pa_ok;
++static unsigned int early_stage_identity_ok = 1;
++static unsigned int early_stage_physmap_ok;
+ #define EARLY_WIDTH 1080u
+ #define EARLY_HEIGHT 2400u
+ #define EARLY_STRIDE (4320u / 4)
+@@ -119,19 +124,25 @@ sweet_early_set_fb(uint64_t base)
+ void
+ sweet_early_enable_stage_pa(void)
+ {
+-	early_stage_pa_ok = 1;
++	early_stage_physmap_ok = 1;
+ 	sweet_early_mark(0, "stage channel armed");
+ }
+ 
+ static void
+ sweet_early_stage_stamp(unsigned int stage)
+ {
+-	if (!early_stage_pa_ok) {
++	uint64_t value = EARLY_STAGE_TAG | ((uint64_t)(stage & 0xff) << 56);
++
++	if (early_stage_physmap_ok) {
++		ml_phys_write_double_64(EARLY_STAGE_PA, value);
++		flush_dcache64(EARLY_STAGE_PA, 8, TRUE);
+ 		return;
+ 	}
+-	ml_phys_write_double_64(EARLY_STAGE_PA,
+-	    EARLY_STAGE_TAG | ((uint64_t)(stage & 0xff) << 56));
+-	flush_dcache64(EARLY_STAGE_PA, 8, TRUE);
++
++	if (early_stage_identity_ok) {
++		*(volatile uint64_t *)(uintptr_t)EARLY_STAGE_PA = value;
++		__asm__ volatile("dsb sy" ::: "memory");
++	}
+ }
+ 
+ void
+@@ -182,6 +193,13 @@ sweet_early_panic(const char *fmt, va_list *args)
+ void
+ sweet_early_relocate(uint64_t base)
+ {
++	/*
++	 * The bootstrap V=P map is going away, so the direct stage path would
++	 * fault from here on.  Stages 8-14 are simply not stamped; arm_init
++	 * re-arms the channel on the physmap once arm_vm_init returns.
++	 */
++	early_stage_identity_ok = 0;
++
+ 	sweet_early_mark(8, "leaving bootstrap TTBR0");
+ 	early_fb = (volatile uint32_t *)(uintptr_t)base;
+ 	__asm__ volatile("dsb sy" ::: "memory");

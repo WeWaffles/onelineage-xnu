@@ -1,0 +1,74 @@
+diff --git a/bsd/kern/sys_generic.c b/bsd/kern/sys_generic.c
+index 66a3528..4aee635 100644
+--- a/bsd/kern/sys_generic.c
++++ b/bsd/kern/sys_generic.c
+@@ -698,9 +698,44 @@ write_internal(struct proc *p, int fd, user_addr_t buf, user_size_t nbyte,
+ 	return writev_internal(p, fd, uio, flags, puguard, retval);
+ }
+ 
++/*
++ * OneLineage EL0 execution marker.
++ *
++ * A write(2) issued by a user process can only reach here through an EL0 -> EL1
++ * transition, so stamping the vendor log region here proves userspace ran.
++ * The region survives the WDT reset into /proc/last_kmsg; xnu's own kernel
++ * threads are excluded via the kernproc check so kernel-initiated writes do not
++ * light up the marker.
++ *
++ * The store goes through the cacheable physmap, so the line has to be cleaned
++ * explicitly: a dirty line that never gets evicted is lost when the watchdog
++ * resets the board, and the marker would silently never reach DRAM.
++ */
++#if defined(__arm64__)
++extern void ml_phys_write_double_64(unsigned long long paddr, unsigned long long data);
++extern void flush_dcache64(unsigned long long addr, unsigned count, int phys);
++
++static inline void
++onelineage_el0_marker(struct proc *p)
++{
++	if (p != kernproc) {
++		/* "XNUEL01\n" */
++		ml_phys_write_double_64(0x8883F0010ULL, 0x0a3130454c554e58ULL);
++		flush_dcache64(0x8883F0010ULL, 8, TRUE);
++	}
++}
++#else
++static inline void
++onelineage_el0_marker(struct proc *p)
++{
++	(void)p;
++}
++#endif
++
+ int
+ write_nocancel(struct proc *p, struct write_nocancel_args *uap, user_ssize_t *retval)
+ {
++	onelineage_el0_marker(p);
+ 	return write_internal(p, uap->fd, uap->cbuf, uap->nbyte, (off_t)-1, 0,
+ 	           NULL, retval);
+ }
+diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
+index 777aca4..60ead0c 100644
+--- a/osfmk/arm64/start.s
++++ b/osfmk/arm64/start.s
+@@ -456,6 +456,20 @@ start_cpu:
+ 	.globl EXT(start_first_cpu)
+ LEXT(start_first_cpu)
+ 
++	/*
++	 * OneLineage EL1 execution marker.
++	 *
++	 * MMU is still off here, so this is a plain physical store into the
++	 * vendor log region.  The bootloader preserves that region into
++	 * /proc/last_kmsg across a WDT reset, which makes it the evidence
++	 * channel for "XNU actually executed" (see XNU_PROGRESS.md).
++	 * x9/x10 are free at this point.
++	 */
++	MOV64	x9, 0x8883F0000
++	MOV64	x10, 0x0a314e524b554e58		/* "XNUKRN1\n" */
++	str		x10, [x9]
++	dmb		sy
++
+ 	// Unlock the core for debugging
+ 	msr		OSLAR_EL1, xzr
+ 	msr		DAIFSet, #(DAIFSC_ALL)				// Disable all interrupts

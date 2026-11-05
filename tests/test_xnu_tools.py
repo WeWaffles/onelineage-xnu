@@ -186,8 +186,7 @@ class XnuSeriesTest(unittest.TestCase):
 
     def test_vendored_series_matches_manifest(self):
         self.assertEqual(self.series["source"]["tag"], "xnu-8796.141.3")
-        manifest = json.loads(self.series.read_text(encoding="utf-8"))
-        self.assertEqual(len(self.patches), len(manifest["patches"]))
+        self.assertEqual(len(self.patches), len(self.series["patches"]))
         self.assertEqual([item["name"][:4] for item in self.patches], [f"{index:04d}" for index in range(1, 19)])
         for item in self.patches:
             self.assertNotIn(b"\r\n", item["data"])
