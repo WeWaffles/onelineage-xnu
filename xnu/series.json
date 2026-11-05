@@ -134,7 +134,7 @@
     {
       "name": "0022-sweet-start-s-bisect-checkpoints.patch",
       "sha256": "d3d53ccd081d7e9f13f25e1780cee71440aea4b3da1d0ff6645255de8ba6bf0e",
-      "purpose": "evidence: bisect start.s — after the OSLAR/DAIF unlock, the splash band, the boot args, and the bootstrap mappings"
+      "purpose": "evidence: bisect start.s \u2014 after the OSLAR/DAIF unlock, the splash band, the boot args, and the bootstrap mappings"
     },
     {
       "name": "0023-sweet-gate-qemu-splash-band.patch",
@@ -145,6 +145,121 @@
       "name": "0024-sweet-bootstrap-stage-channel.patch",
       "sha256": "49dacb6c302bafec9b35c6e39c6e4f49e1ec8ac999d100e40e6d5931b0650d2e",
       "purpose": "evidence: map the log region into the bootstrap V=P table so stages are readable from arm_init entry, stamp the moment translation turns on, and switch to the physmap once that map is gone"
+    },
+    {
+      "name": "0025-sweet-legacy-exc-pc.patch",
+      "sha256": "f446dafdfd546661f0fc745b6d52a35b90e5932434ad8d11be527bfd34a80abd",
+      "purpose": "Sweet legacy exc pc"
+    },
+    {
+      "name": "0026-sweet-fdt-invalidate-reserved-release.patch",
+      "sha256": "868630858a88f709e658b22962558a175075af1ce615ab6f677fd2eff8ebeab0",
+      "purpose": "Sweet fdt invalidate reserved release"
+    },
+    {
+      "name": "0027-sweet-console-buffer-when-irqs-off.patch",
+      "sha256": "49178cbc2f26900d089700be043e23a41e9f7c1d33f36fb46ef04e550f01336b",
+      "purpose": "Sweet console buffer when irqs off"
+    },
+    {
+      "name": "0028-sweet-write-fork-evidence.patch",
+      "sha256": "cf9943e524d98b915f101bd9093c095149a259f5f1a884aa197a70069a338a31",
+      "purpose": "Sweet write fork evidence"
+    },
+    {
+      "name": "0029-sweet-persistent-write-and-fork-child-fd.patch",
+      "sha256": "1b3f7616efe4506a4df3f8105964442bd6e6c3820c1161944211d810b792a04a",
+      "purpose": "Sweet persistent write and fork child fd"
+    },
+    {
+      "name": "0030-sweet-valid-slots-and-exec-evidence.patch",
+      "sha256": "1ee85f9d0e3518a2dd4d3b86740d6d4cf6479f546d3071b5f5a6797dee5d9d9c",
+      "purpose": "Sweet valid slots and exec evidence"
+    },
+    {
+      "name": "0031-sweet-exec-records-refreshed-at-exception-rate.patch",
+      "sha256": "4af99ab2684f7e75e32204e804b5aca7a5ff892576a1d13eb404af047440dbe6",
+      "purpose": "Sweet exec records refreshed at exception rate"
+    },
+    {
+      "name": "0032-sweet-exec-enter-on-the-execve-path.patch",
+      "sha256": "55f9a49b8cb1f97f996c1ab93150de0273d90d1e1000de3e3a3e6c363044fb3c",
+      "purpose": "Sweet exec enter on the execve path"
+    },
+    {
+      "name": "0033-sweet-classify-writes-and-execs-in-the-mirror.patch",
+      "sha256": "fa6fb7767b9d64fff9a6c25c264ea523a00d99072d1f0c8fad0d8e7a38ea4531",
+      "purpose": "Sweet classify writes and execs in the mirror"
+    },
+    {
+      "name": "0034-sweet-separate-syscall-and-write-counters.patch",
+      "sha256": "d69bc42b3f4db04b98a6714d9333ed31f6c5e3443211aa1af2564734402497e7",
+      "purpose": "Sweet separate syscall and write counters"
+    },
+    {
+      "name": "0035-sweet-mirror-per-call-records.patch",
+      "sha256": "f2023aa8974607595e7c5923abd76233d0e02f04c43694f9eb4767c95bc5b9c2",
+      "purpose": "Sweet mirror per call records"
+    },
+    {
+      "name": "0036-sweet-mockfs-serves-a-second-image.patch",
+      "sha256": "303ca3452a3f27a9f576fef9aa4cf0f285bd029c08ef33ea423d556e75b8ca91",
+      "purpose": "Sweet mockfs serves a second image"
+    },
+    {
+      "name": "0037-sweet-record-wait4-and-four-exec-entries.patch",
+      "sha256": "26fc63422f961fdd700a62ba399d5287aea5eecf9f9734a7254add15093e2e14",
+      "purpose": "Sweet record wait4 and four exec entries"
+    },
+    {
+      "name": "0038-sweet-record-wait4-and-exit-at-dispatch.patch",
+      "sha256": "e722ac9943ce4a760230c9c7a7886e026d2490016490c274fee8039732ccd713",
+      "purpose": "Sweet record wait4 and exit at dispatch"
+    },
+    {
+      "name": "0039-sweet-record-the-exit-path-to-the-parent.patch",
+      "sha256": "733e168a864309a77d528b5d37de12f2c69c513456e22660ecee94540b2480fb",
+      "purpose": "Sweet record the exit path to the parent"
+    },
+    {
+      "name": "0040-sweet-record-the-sleep-and-wake-addresses.patch",
+      "sha256": "e6a033005c3fed76b7e9bc6156bc25e48ece6e63af31ed8f6bba10f97c4688f0",
+      "purpose": "Sweet record the sleep and wake addresses"
+    },
+    {
+      "name": "0041-sweet-stamp-the-wait-wake-return-triple.patch",
+      "sha256": "30f45537e2d7391f5af5568ffaea66609ce1c1990d1609bf0fc2f503c219df29",
+      "purpose": "Sweet stamp the wait wake return triple"
+    },
+    {
+      "name": "0042-sweet-stamp-sleep-entry-and-the-child-wakeup.patch",
+      "sha256": "94e0da90c3226e20a7b330ab3b311fd534057df34accd850e43795d206c23362",
+      "purpose": "Sweet stamp sleep entry and the child wakeup"
+    },
+    {
+      "name": "0043-sweet-stamp-wait4-entry-and-the-reap.patch",
+      "sha256": "1ad270b1406a718f0ed1494d3c50b2180669307652c4354e9729baa5641f5174",
+      "purpose": "Sweet stamp wait4 entry and the reap"
+    },
+    {
+      "name": "0044-sweet-stop-dereferencing-the-mmap-result.patch",
+      "sha256": "2939c65dd7de65617ec3d9bdb48906db1e2c85c189baf579286c4c9f0fe796c6",
+      "purpose": "Sweet stop dereferencing the mmap result"
+    },
+    {
+      "name": "0045-sweet-stamp-the-wait-continuation-entry.patch",
+      "sha256": "2b842b34309b13c0c360d0ee6c930269fb66b061105b67ddff600fa18e8a17d1",
+      "purpose": "Sweet stamp the wait continuation entry"
+    },
+    {
+      "name": "0046-sweet-stamp-the-reaped-status.patch",
+      "sha256": "158a67d6ddc87b860611abe2489a406b2769bf72de54b8583365bc7c686c1714",
+      "purpose": "Sweet stamp the reaped status"
+    },
+    {
+      "name": "0047-sweet-record-el0-user-faults-in-fixed-slots.patch",
+      "sha256": "62728c59e08ffbb7b03f971ceb518af1ebf6a68f71277db7d3bd2a6f06c1e08b",
+      "purpose": "Sweet record el0 user faults in fixed slots"
     }
   ],
   "verified": {
